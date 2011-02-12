@@ -1,0 +1,330 @@
+This article describes the internals of launching an instance in <a href="http://nova.openstack.org">OpenStack Nova</a>.
+
+<h2>Overview</h2>
+
+Launching a new instance involves multiple components inside OpenStack Nova:
+
+<ul>
+<li>API server: handles requests from the user and relays them to the cloud controller.</li>
+<li>Cloud controller: handles the communication between the compute nodes, the networking controllers, the API server and the scheduler.</li>
+<li>Scheduler: selects a host to run a command.
+<li>Compute worker: manages computing instances: launch/terminate instance, attach/detach volumes...</li>
+<li>Network controller: manages networking resources: allocate fixed IP addresses, configure VLANs...</li>
+</ul>
+
+Note: There are more components in Nova like the authentication manager, the object store and the volume controller but we are not going to study them as we are focusing on instance launching in this article.
+
+The flow of launching an instance goes like this: The API server receives a run_instances command from the user. The API server relays the message to the cloud controller (1). Authentication is performed to make sure this user has the required permissions. The cloud controller sends the message to the scheduler (2). The scheduler casts the message to a random host and asks him to start a new instance (3). The compute worker on the host grabs the message (4). The compute worker needs a fixed IP to launch a new instance so it sends a message to the network controller (5,6,7,8). The compute worker continues with spawning a new instance. We are going to see all those steps in details next.
+
+<img src="/images/blog/openstack/launch_instance_overview.png">
+
+<h2>API</h2>
+
+You can use the OpenStack API or EC2 API to launch a new instance. We are going to use the EC2 API. We add a new key pair and we use it to launch an instance of type m1.tiny.
+
+[code lang="bash"]
+cd /tmp/
+euca-add-keypair test > test.pem
+euca-run-instances -k test -t m1.tiny ami-tiny
+[/code]
+
+run_instances() in api/ec2/cloud.py is called which results in compute API create() in compute/API.py being called.
+
+[code lang="python"]
+def run_instances(self, context, **kwargs):
+  ...
+  instances = self.compute_api.create(context,
+            instance_type=instance_types.get_by_type(
+                kwargs.get('instance_type', None)),
+            image_id=kwargs['image_id'],
+            ...
+[/code]
+
+Compute API create() does the following:
+
+<ul>
+<li>Check if the maximum number of instances of this type has been reached.</li>
+<li>Create a security group if it doesn't exist.</li>
+<li>Generate MAC addresses and hostnames for the new instances.</li>
+<li>Send a message to the scheduler to run the instances.</li>
+</ul>
+
+<h2>Cast</h2>
+
+Let's pause for a minute and look at how the message is sent to the scheduler. This type of message delivery in OpenStack is defined as RPC casting. RabbitMQ is used here for delivery. The publisher (API) sends the message to a topic exchange (scheduler topic). A consumer (Scheduler worker) retrieves the message from the queue. No response is expected as it is a cast and not a call. We will see call later.
+
+<img src="/images/blog/openstack/rpc_cast.png">
+
+Here is the code casting that message:
+
+[code lang="python"]
+LOG.debug(_("Casting to scheduler for %(pid)s/%(uid)s's"
+        " instance %(instance_id)s") % locals())
+rpc.cast(context,
+         FLAGS.scheduler_topic,
+         {"method": "run_instance",
+          "args": {"topic": FLAGS.compute_topic,
+                   "instance_id": instance_id,
+                   "availability_zone": availability_zone}})
+[/code]
+
+You can see that the scheduler topic is used and the message arguments indicates what we want the scheduler to use for its delivery. In this case, we want the scheduler to send the message using the compute topic.
+
+<h2>Scheduler</h2>
+
+The scheduler receives the message and sends the run_instance message to a random host. The chance scheduler is used here. There are more scheduler types like the zone scheduler (pick a random host which is up in a specific availability zone) or the simple scheduler (pick the least loaded host). Now that a host has been selected, the following code is executed to send the message to a compute worker on the host.
+
+[code lang="python"]
+rpc.cast(context,
+         db.queue_get_for(context, topic, host),
+         {"method": method,
+          "args": kwargs})
+LOG.debug(_("Casting to %(topic)s %(host)s for %(method)s") % locals())
+[/code]
+
+<h2>Compute</h2>
+
+The Compute worker receives the message and the following method in compute/manager.py is called:
+
+[code lang="python"]
+def run_instance(self, context, instance_id, **_kwargs):
+  """Launch a new instance with specified options."""
+  ...
+[/code]
+
+run_instance() does the following:
+
+<ul>
+<li>Check if the instance is already running.</li>
+<li>Allocate a fixed IP address.</li>
+<li>Setup a VLAN and a bridge if not already setup.</li>
+<li>Spawn the instance using the virtualization driver.</li>
+</ul>
+
+<h2>Call to network controller</h2>
+
+A RPC call is used to allocate a fixed IP. A RPC call is different than a RPC cast because it uses a topic.host exchange meaning that a specific host is targeted. A response is also expected.
+
+<img src="/images/blog/openstack/rpc_call.png">
+
+<h2>Spawn instance</h2>
+
+Next is the instance spawning process performed by the virtualization driver. libvirt is used in our case. The code we are going to look at is located in virt/libvirt_conn.py.
+
+First thing that needs to be done is the creation of the libvirt xml to launch the instance. The to_xml() method is used to retrieve the xml content. Following is the XML for our instance.
+
+[code lang="xml"]
+<domain type='qemu'>
+    <name>instance-00000001</name>
+    <memory>524288</memory>
+    <os>
+        <type>hvm</type>
+        <kernel>/opt/novascript/trunk/nova/..//instances/instance-00000001/kernel</kernel>
+        <cmdline>root=/dev/vda console=ttyS0</cmdline>
+        <initrd>/opt/novascript/trunk/nova/..//instances/instance-00000001/ramdisk</initrd>
+    </os>
+    <features>
+        <acpi/>
+    </features>
+    <vcpu>1</vcpu>
+    <devices>
+        <disk type='file'>
+            <driver type='qcow2'/>
+            <source file='/opt/novascript/trunk/nova/..//instances/instance-00000001/disk'/>
+            <target dev='vda' bus='virtio'/>
+        </disk>
+        <interface type='bridge'>
+            <source bridge='br100'/>
+            <mac address='02:16:3e:17:35:39'/>
+            <!--   <model type='virtio'/>  CANT RUN virtio network right now -->
+            <filterref filter="nova-instance-instance-00000001">
+                <parameter name="IP" value="10.0.0.3" />
+                <parameter name="DHCPSERVER" value="10.0.0.1" />
+                <parameter name="RASERVER" value="fe80::1031:39ff:fe04:58f5/64" />
+                <parameter name="PROJNET" value="10.0.0.0" />
+                <parameter name="PROJMASK" value="255.255.255.224" />
+                <parameter name="PROJNETV6" value="fd00::" />
+                <parameter name="PROJMASKV6" value="64" />
+            </filterref>
+        </interface>
+
+        <!-- The order is significant here.  File must be defined first -->
+        <serial type="file">
+            <source path='/opt/novascript/trunk/nova/..//instances/instance-00000001/console.log'/>
+            <target port='1'/>
+        </serial>
+
+        <console type='pty' tty='/dev/pts/2'>
+            <source path='/dev/pts/2'/>
+            <target port='0'/>
+        </console>
+
+        <serial type='pty'>
+            <source path='/dev/pts/2'/>
+            <target port='0'/>
+        </serial>
+
+    </devices>
+</domain>
+[/code]
+
+The hypervisor used is qemu. The memory allocated for the guest will be 524 kbytes. The guest OS will boot from a kernel and initrd stored on the host OS.
+
+Number of virtual CPUs allocated for the guest OS is 1. ACPI is enabled for power management.
+
+Multiple devices are defined:
+<ul>
+<li>The disk image is a file on the host OS using the driver qcow2. qcow2 is a qemu disk image copy-on-write format.</li>
+<li>The network interface is a bridge visible to the guest. We define network filtering parameters like IP which means this interface will always use 10.0.0.3 as the source IP address.</li>
+<li>Device logfile. All data sent to the character device is written to console.log.</li>
+<li>Pseudo TTY: virsh console can be used to connect to the serial port locally.</li>
+</ul>
+
+Next is the preparation of the network filtering. The firewall driver used by default is iptables. The rules are defined in apply_ruleset() in the class IptablesFirewallDriver. Let's take a look at the firewall chains and rules for this instance.
+
+[code lang="bash"]
+*filter
+...
+:nova-ipv4-fallback - [0:0]
+:nova-local - [0:0]
+:nova-inst-1 - [0:0]
+:nova-sg-1 - [0:0]
+-A nova-ipv4-fallback -j DROP
+-A FORWARD -j nova-local
+-A nova-local -d 10.0.0.3 -j nova-inst-1
+-A nova-inst-1 -m state --state INVALID -j DROP
+-A nova-inst-1 -m state --state ESTABLISHED,RELATED -j ACCEPT
+-A nova-inst-1 -j nova-sg-1
+-A nova-inst-1 -s 10.1.3.254 -p udp --sport 67 --dport 68
+-A nova-inst-1 -j nova-ipv4-fallback
+-A nova-sg-1 -p tcp -s 10.0.0.0/27 -m multiport --dports 1:65535 -j ACCEPT
+-A nova-sg-1 -p udp -s 10.0.0.0/27 -m multiport --dports 1:65535 -j ACCEPT
+-A nova-sg-1 -p icmp -s 10.0.0.0/27 -m icmp --icmp-type 1/65535 -j ACCEPT
+COMMIT
+[/code]
+
+First you have the chains: nova-local, nova-inst-1, nova-sg-1, nova-ipv4-fallback and then the rules.
+
+Let's look at the different chains and rules:
+
+Packets routed through the virtual network are handled by the chain nova-local.
+[code lang="bash"]
+-A FORWARD -j nova-local
+[/code]
+
+If the destination is 10.0.0.3 then it is for our instance so we jump to the chain nova-inst-1.
+[code lang="bash"]
+-A nova-local -d 10.0.0.3 -j nova-inst-1
+[/code]
+
+If the packet could not be identified, drop it.
+[code lang="bash"]
+-A nova-inst-1 -m state --state INVALID -j DROP
+[/code]
+
+If the packet is associated with an established connection or is starting a new connection but associated with an existing connection, accept it.
+[code lang="bash"]
+-A nova-inst-1 -m state --state ESTABLISHED,RELATED -j ACCEPT
+[/code]
+
+Allow DHCP responses.
+[code lang="bash"]
+-A nova-inst-1 -s 10.0.0.254 -p udp --sport 67 --dport 68
+[/code]
+
+Jump to the security group chain to check the packet against its rules.
+[code lang="bash"]
+-A nova-inst-1 -j nova-sg-1
+[/code]
+
+Security group chain. Accept all TCP packets from 10.0.0.0/27 and ports 1 to 65535.
+[code lang="bash"]
+-A nova-sg-1 -p tcp -s 10.0.0.0/27 -m multiport --dports 1:65535 -j ACCEPT
+[/code]
+
+Accept all UDP packets from 10.0.0.0/27 and ports 1 to 65535.
+[code lang="bash"]
+-A nova-sg-1 -p udp -s 10.0.0.0/27 -m multiport --dports 1:65535 -j ACCEPT
+[/code]
+
+Accept all ICMP packets from 10.0.0.0/27 and ports 1 to 65535.
+[code lang="bash"]
+-A nova-sg-1 -p icmp -s 10.0.0.0/27 -m icmp --icmp-type 1/65535 -j ACCEPT
+[/code]
+
+Jump to fallback chain.
+[code lang="bash"]
+-A nova-inst-1 -j nova-ipv4-fallback
+[/code]
+
+This is the fallback chain's rule where we drop the packet.
+[code lang="bash"]
+-A nova-ipv4-fallback -j DROP
+[/code]
+
+Here is an example of a packet for a new TCP connection to 10.0.0.3:
+
+<img src="/images/blog/openstack/iptables_2.png">
+
+Following the firewall rules preparation is the image creation. This happens in _create_image().
+
+[code lang="python"]
+def _create_image(self, inst, libvirt_xml, suffix='', disk_images=None):
+  ...
+[/code]
+
+In this method, libvirt.xml is created based on the XML we generated above.
+
+A copy of the ramdisk, initrd and disk images are made for the hypervisor to use.
+
+If the flat network manager is used then a network configuration is injected into the guest OS image. We are using the VLAN manager in this example.
+
+The instance's SSH key is injected into the image. Let's look at this part in more details. The disk inject_data() method is called.
+ 
+[code lang="python"]
+disk.inject_data(basepath('disk'), key, net,
+                 partition=target_partition,
+                 nbd=FLAGS.use_cow_images)
+[/code]
+
+basepath('disk') is where the instance's disk image is located on the host OS. key is the SSH key string. net is not set in our case because we don't inject a networking configuration. partition is None because we are using a kernel image otherwise we could use a partitioned disk image. Let's look inside inject_data().
+
+First thing happening here is linking the image to a device. This happens in _link_device().
+
+[code lang="python"]
+device = _allocate_device()
+utils.execute('sudo qemu-nbd -c %s %s' % (device, image))
+# NOTE(vish): this forks into another process, so give it a chance
+#             to set up before continuuing
+for i in xrange(10):
+    if os.path.exists("/sys/block/%s/pid" % os.path.basename(device)):
+        return device
+    time.sleep(1)
+raise exception.Error(_('nbd device %s did not show up') % device)
+[/code]
+
+_allocate_device() returns the next available ndb device: /dev/ndbx where x is between 0 and 15. qemu-nbd is a QEMU disk network block device server. Once this is done, we get the device, let say: /dev/ndb0.
+
+We disable filesystem check for this device. mapped_device here is "/dev/ndb0".
+[code lang="python"]
+out, err = utils.execute('sudo tune2fs -c 0 -i 0 %s' % mapped_device)
+[/code]
+
+We mount the file system to a temporary directory and we add the SSH key to the ssh authorized_keys file.
+   
+[code lang="python"]
+sshdir = os.path.join(fs, 'root', '.ssh')
+utils.execute('sudo mkdir -p %s' % sshdir)  # existing dir doesn't matter
+utils.execute('sudo chown root %s' % sshdir)
+utils.execute('sudo chmod 700 %s' % sshdir)
+keyfile = os.path.join(sshdir, 'authorized_keys')
+utils.execute('sudo tee -a %s' % keyfile, '\n' + key.strip() + '\n')
+[/code]
+
+In the code above, fs is the temporary directory.
+
+Finally, we unmount the filesystem and unlink the device. This concludes the image creation and setup.
+
+Next step in the virtualization driver spawn() method is the instance launch itself using the driver createXML() binding. Following that is the firewall rules apply step.
+
+That's it for now. I hope you enjoyed this article. Please write a comment if you have any feedback.

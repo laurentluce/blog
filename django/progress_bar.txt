@@ -1,0 +1,116 @@
+In this article, I am going to describe how I implemented upload to Django + progress bar with Ajax and jQuery. I needed this feature so users could post their dish pictures on <a href="http://www.gourmious.com">Gourmious</a> and follow the upload's progress.
+
+<h2>Client Side</h2>
+
+We need a form so the user can select a file to upload.
+
+[code lang="html"]
+<form id="form_upload" action="/upload" method="POST">
+  <input type="file" name="picture" id="picture" />
+  <input type="hidden" id="X-Progress-ID" name="X-Progress-ID" value=""/>
+  <input type="hidden" id="id" name="id" value=""/>
+  <input id="form_submit_button" class="tp-button" type="submit" value="Submit" />
+  </form>
+[/code]
+
+We added 2 hidden inputs, first one is 'X-Progress-ID' which is the upload ID so we can support simultaneous uploads on the server side. We will see later how that value is handled by the server.
+
+We also have the hidden input 'id' representing the dish ID in our case.
+
+We want to use Ajax to send the POST request so it can be integrated nicely in a modern web interface along with a progress bar. To support that, we are going to use the <a href="http://jquery.malsup.com/form/#download">jQuery Form plugin</a>.
+
+The function ajaxSubmit() is going to take care of everything for us.
+
+We generate a random string for this upload ID and set the input value to that string.
+We need to specify a URL to be called for the upload and 2 callback functions: one to be called before the request and 1 after.
+
+[code lang="js"]
+$('#X-Progress-ID').val('random string');
+var options = {
+  dataType: 'xml',
+  url: '/upload?X-Progress-ID='+$('#X-Progress-ID').val(),
+  beforeSubmit: showRequest,
+  success: showResponse
+}
+$('#form_upload').ajaxSubmit(options);
+[/code]
+
+When the user presses submit, we want to display a progress bar so we use the following JS code to add a progress bar to the form. The progressBar() method is part of the <a href="http://t.wits.sg/jquery-progress-bar/">jQuery progress bar plugin</a>.
+
+[code lang="js"]
+$('#form_upload').find('#form_submit_input').append('&lt;span id="uploadprogressbar"&gt;&lt;/span&lt;');
+$('#form_upload').find('#uploadprogressbar').progressBar();
+[/code]
+
+Now, we need to add a function running every few seconds to get the upload progress from the server and update the progress bar accordingly.
+
+To do that, we use setInterval() to issue a GET request to the server to get the progress value using the JSON format. We pass the upload ID to the server. When the value null is returned, we know that the upload is finished.
+
+[code lang="js"]
+function startProgressBarUpdate(upload_id) {
+  $("#uploadprogressbar").fadeIn();
+  if(g_progress_intv != 0)
+    clearInterval(g_progress_intv);
+  g_progress_intv = setInterval(function() {
+    $.getJSON("/get_upload_progress?X-Progress-ID="
++ upload_id, function(data) {
+      if (data == null) {
+        $("#uploadprogressbar").progressBar(100);
+        clearInterval(g_progress_intv);
+        g_progress_intv = 0;
+        return;
+      }
+      var percentage = Math.floor(100 * parseInt(data.uploaded) / parseInt(data.length));
+      $("#uploadprogressbar").progressBar(percentage);
+    });
+  }, 5000);
+}
+[/code]
+
+<h2>Server side</h2>
+
+First, we need a function in views.py to handle the upload. This function handles the request: "/upload?X-Progress-ID=xxxx". We are reading the file chunk by chunk to not use too much RAM.
+
+[code lang="python"]
+def upload(request):
+  id = request.POST['id']
+  path = '/var/www/pictures/%s' % id
+  f = request.FILES['picture']
+  destination = open(path, 'wb+')
+  for chunk in f.chunks():
+    destination.write(chunk)
+  destination.close()
+[/code]
+
+How do we keep track of the upload progress? We need to use a different file upload handler. We are going to use <a href="http://djangosnippets.org/snippets/678/">UploadProgressCachedHandler</a>. We just need the class from this snippet, not the view function which we are going to write ourself. You can add the class to a file named uploadprogresscachedhandler in your project.
+
+This handler saves the upload progress to the cache so it can be retrieved easily when we receive the requests from the client.
+
+To enable this handler, we need to add the following to settings.py:
+[code lang="python"]
+from django.conf import global_settings
+FILE_UPLOAD_HANDLERS = (uploadprogresscachedhandler.UploadProgressCachedHandler', ) \
++ global_settings.FILE_UPLOAD_HANDLERS
+[/code]
+
+We also need to enable the cache system. We are going to use memcached. This goes to settings.py too.
+
+[code lang="python"]
+CACHE_BACKEND = 'memcached://127.0.0.1:11211/'
+[/code]
+
+You need to make sure memcached and the python bindings are installed on your server.
+
+We need to add a function in views.py to return the upload progress asked by the client every few seconds during the upload. This function handles the request "/get_upload_progress?X-Progress-ID=xxxx". The progress value is stored using the key "remoteaddress_uploadid".
+
+[code lang="python"]
+def get_upload_progress(request):
+  from django.utils import simplejson
+  cache_key = "%s_%s" % (request.META['REMOTE_ADDR'], request.GET['X-Progress-ID'])
+  data = cache.get(cache_key)
+  return HttpResponse(simplejson.dumps(data))
+[/code]
+
+That's it for now. Don't hesitate to add comments to discuss more.
+
+If you like this article, it would be cool if you can share your favorite restaurant dishes on <a href="http://www.gourmious.com">Gourmious</a>.

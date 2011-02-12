@@ -1,0 +1,218 @@
+Title: Add REST resources to a database using Python and SQLAchemy. 
+
+This tutorial shows how to download REST resources to your database using Python and SQLAchemy. We are going to download manufacturers and cars resources to our database. We will also show how easy it is to query them once they are stored.
+
+<h2>Requirements</h2>
+
+We need to install SQLAchemy and simplejson Python libraries:
+
+[code lang="bash"]
+easy_install SQLAlchemy
+easy_install simplejson
+[/code]
+
+You can use any database supported by SQLAlchemy: <a href="http://www.sqlalchemy.org/docs/core/engines.html#supported-databases">List of databases</a>. I am using MySQL.
+
+<h2>Imports</h2>
+
+We need to import the following modules for our code to work fine.
+
+[code lang="python"]
+import urllib2
+import simplejson
+from sqlalchemy import Column, Integer, String, ForeignKey, create_engine
+from sqlalchemy.orm import sessionmaker, relationship, backref
+from sqlalchemy.ext.declarative import declarative_base
+[/code]
+
+<h2>Tables, classes and mappers</h2>
+
+SQLAchemy declarative configuration style allows us to define our tables, resources classes and the mapping between the class and the tables just by declaring 2 classes derived from the class Base.
+
+[code lang="python"]
+Base = declarative_base()
+[/code]
+
+Let's define the manufacturers table, class and mapper.
+
+[code lang="python"]
+class Manufacturer(Base):
+  """
+  Manufacturer resource
+  """
+  __tablename__ = 'manufacturers'
+  
+  id = Column(Integer, primary_key=True)
+  name = Column(String(32), unique=True)
+  country = Column(String(32))
+
+  def __init__(self, resource):
+    """
+    Class instantiation
+
+    @param resource resource JSON attribute
+    """
+    self.name = resource['name']
+    self.country = resource['country']
+    
+  def __repr__(self):
+    return "<manufacturer('%s in %s')>" % (self.name, self.country)
+[/code]
+
+Let's define the cars table, class and mapper. Note how the relationship between the car and its manufacturer is defined.
+
+[code lang="python"]
+class Car(Base):
+  """
+  Car resource
+  """
+  __tablename__ = 'cars'
+        
+  id = Column(Integer, primary_key=True)
+  name = Column(String(32), unique=True)
+  max_speed = Column(Integer)
+  year_released = Column(Integer)
+  manufacturer_id = Column(Integer, ForeignKey('manufacturers.id'))
+
+  manufacturer = relationship(Manufacturer, backref=backref('cars', order_by=id))
+
+  def __init__(self, resource):
+    """
+    Class instantiation
+
+    @param resource resource JSON attribute
+    """
+    self.name = resource['name']
+    self.max_speed = resource['max_speed']
+    self.year_released = resource['year_released']
+    
+  def __repr__(self):
+    return "<car('%s - max speed: %d, released in %s')>" % (self.name, self.max_speed, self.year_released)
+[/code]
+
+Our main class is named "Resources" and we will add methods to setup a connection to the database, create the tables and download the resources.  
+
+[code lang="python"]
+class Resources:
+  """
+  Main class 
+  """
+  def __init__(self):
+    """
+    Class instantiation
+
+    @param settings dict of settings
+    """
+    # database engine
+    self.engine = None
+    # Collection of tables and their associated schema constructs
+    self.metadata = None
+    # database session
+    self.session = None
+
+    self.setup_connection()
+    self.setup_tables()
+    self.process()
+
+  def setup_connection(self):
+    """
+    Create DB session
+    """
+    ...
+
+  def setup_tables(self):
+    """
+    Create tables in database.
+    """
+    ...
+
+  def process(self):
+    """
+    Get resources and add them to DB
+    """
+    ...
+[/code]
+
+Let's look at how we can setup a connection to our database. We call create_engine() and pass the database dialect and connection arguments. In our case, we use the string: 'mysql://root:password@localhost:3306/vroom' where vroom is the name of the database. This allows us to define our session using the Session factory. This session is the ORM's handle to the database.
+
+[code lang="python"]
+  def setup_connection(self):
+    """
+    Create DB session
+    """
+    s = 'mysql://root:password@localhost:3306/vroom'
+    self.engine = create_engine(s)
+    Session = sessionmaker(bind=self.engine)
+    self.session = Session()
+[/code]
+
+Next is the tables creation using our tables definition. create_all() can be called multiple times safely and only missing tables will be created.
+ 
+[code lang="python"]
+  def setup_tables(self):
+    """
+    Create tables in database.
+    """
+    self.metadata = Base.metadata
+    self.metadata.create_all(self.engine)
+[/code]
+
+Using simplejson and urllib2, it is really easy to get resources and retrieve them as a dictionary. Let's get the list of manufacturers.
+
+[code lang="python"]
+  def process(self):
+    ...
+    data = simplejson.load(urllib2.urlopen("http://api_url/manufacturers"))
+[/code]
+
+data will contain something like this:
+
+[code lang="python"]
+{"manufacturers": [
+  {"name": "Peugeot", "country": "France"},
+  {"name": "Chevrolet", "country": "USA"},
+  ]
+}
+[/code]
+
+For each manufacturer, we need to get the list of cars so we can add the resources to the database. SQLAchemy will take care of setting up the foreign keys values for us: ie: relations between the manufacturers and the cars.
+
+[code lang="python"]
+    for i, m in enumerate(data['manufacturers']):
+      # create Manufacturer object
+      manufacturer = Manufacturer(m)
+      # get cars for this manufacturer
+      data2 = simplejson.load(urllib2.urlopen("http://api_url/manufacturers/%s" % manufacturer['name']))
+      # fill-up list of Car objects
+      cars = []
+      for c in data2['cars'][i]:
+        # create Car object and add it to cars list
+        cars.append(Car(c))
+      # add cars list to manufacturer's cars list
+      manufacturer.cars = cars
+      # add manufacturer object to DB
+      self.session.add(manufacturer)
+    # commit changes to DB
+    self.session.commit()
+[/code]
+
+Once the objects are in the database, it is easy to query them using the ORM. For example, let's print the list of manufacturers along with their cars.
+
+[code lang="python"]
+for m in self.session.query(Manufacturer).order_by(Manufacturer.id):
+  print m
+  for c in m.cars:
+    print '-- %s' % c
+[/code]
+
+The output should be something like this:
+
+[code lang="bash"]
+<manufacturer('Peugeot in France')>
+-- <car('307 - max speed: 180, released in 2002')>
+<manufacturer('Chevrolet in USA')>
+-- <car('Malibu - max speed: 190, released in 2010')>
+[/code]
+
+That's it for now. Please add a comment if you have any feedback.
+

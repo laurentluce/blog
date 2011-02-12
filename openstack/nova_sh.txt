@@ -1,0 +1,453 @@
+Update 01/31/2011: Updated article based on the latest nova.sh script.
+
+This article describes the internals of the script nova.sh used to get the OpenStack Nova source code, install it and run it. Nova is a cloud computing fabric controller, the main part of an IaaS system.
+
+The script can be retrieved using Git:
+[code lang="bash"]
+git clone https://github.com/vishvananda/novascript.git
+[/code]
+
+<h2>Arguments</h2>
+
+The script takes 1 mandatory argument and 2 optional arguments:
+<ul>
+<li><b>command</b>: "branch", "install", "run", "terminate", "clean", "scrub".</li>
+<li><b>source branch (branch command only)</b>: default to "lp:nova" which is the location of the source code on Launchpad.</li>
+<li><b>install directory</b>: default to "nova"</li>
+</ul>
+
+Note: You will need to use sudo to run the script.
+
+<h2>Initialization</h2>
+
+The arguments are grabbed from the command line or set to their defaults:
+
+[code lang="bash"]
+CMD=$1
+if [ "$CMD" = "branch" ]; then
+    SOURCE_BRANCH=${2:-lp:nova}
+    DIRNAME=${3:-nova}
+else
+    DIRNAME=${2:-nova}
+fi
+[/code]
+
+The first network interface IP address is grabbed using the ifconfig command. It is explained in the script that if you have more than 1 network interfaces then you should set the environment variable HOST_IP.
+
+[code lang="bash"]
+if [ ! -n "$HOST_IP" ]; then
+HOST_IP=`LC_ALL=C ifconfig  | grep -m 1 'inet addr:'| cut -d: -f2 | awk '{print $1}'`
+fi
+[/code]
+
+By default, sqlite will be used but you can use MySQL instead by setting the env variable USE_MYSQL and MYSQL_PASS.
+[code lang="bash"]
+USE_MYSQL=${USE_MYSQL:-0}
+MYSQL_PASS=${MYSQL_PASS:-nova}
+[/code]
+
+You can also force the script to run some unit tests (Python unit tests) when you use the command "run". For example, it will test the api, authentication, compute, network modules and much more. You can take a look at the folder nova/tests/ to see all the tests.
+[code lang="bash"]
+TEST=${TEST:-0}
+[/code]
+
+LDAP can be used for authentication. It is not used by default. The database is used by default to store authentication data.
+[code lang="bash"]
+USE_LDAP=${USE_LDAP:-0}
+[/code]
+
+OpenDJ can be used instead of OpenLDAP when LDAP is used. OpenDJ is a new LDAPv3 compliant directory service, developed for the Java platform, providing a high performance, highly available and secure store for the identities managed by enterprises.
+[code lang="bash"]
+USE_OPENDJ=${USE_OPENDJ:-0}
+[/code]
+
+IPv6 support can be enabled:
+[code lang="bash"]
+USE_IPV6=${USE_IPV6:-0}
+[/code]
+
+Nova has support for libvirt and you can set LIBVIRT_TYPE to something if you don't like the default qemu. You can set it to "uml" and a different libvirt XML template will be used. Libvirt is a virtualization API.
+[code lang="bash"]
+LIBVIRT_TYPE=${LIBVIRT_TYPE:-qemu}
+[/code]
+
+Next is the network manager type. It defaults to VlanManager where a host-managed VLAN will be created for each project. Other types are FlatManager, FlatDHCPManager. See <a href="http://nova.openstack.org/devref/network.html#module-nova.network.manager">Network Manager Documentation</a> for more details.
+[code lang="bash"]
+NET_MAN=${NET_MAN:-VlanManager}
+[/code]
+
+In case you are using FlatDHCP on multiple hosts, you need to set the env variable FLAT_INTERFACE to a network interface with no defined IP.
+[code lang="bash"]
+FLAT_INTERFACE=ethx
+[/code]
+
+The connection to the database is defined the following way. It will be MySQL or sqlite based on your choice.
+[code lang="bash"]
+if [ "$USE_MYSQL" == 1 ]; then
+    SQL_CONN=mysql://root:$MYSQL_PASS@localhost/nova
+else
+    SQL_CONN=sqlite:///$NOVA_DIR/nova.sqlite
+fi
+[/code]
+
+The authentication driver is set based on your choice: LDAP or not. If LDAP is not selected (by default), it will use the database to store the authentication data.
+[code lang="bash"]
+if [ "$USE_LDAP" == 1 ]; then
+    AUTH=ldapdriver.LdapDriver
+else
+    AUTH=dbdriver.DbDriver
+fi
+[/code]
+
+<h2>Branch command</h2>
+
+This command installs Bazaar (bzr) which is a distributed version control system, initializes the repository, retrieves the latest source code for Nova and places it in the Nova folder you just defined It also creates the "instances" folder and "networks" folders.
+[code lang="bash"]
+if [ "$CMD" == "branch" ]; then
+    sudo apt-get install -y bzr
+    if [ ! -e "$DIR/.bzr" ]; then
+        bzr init-repo $DIR
+    fi
+    rm -rf $NOVA_DIR
+    bzr branch $SOURCE_BRANCH $NOVA_DIR
+    cd $NOVA_DIR
+    mkdir -p $NOVA_DIR/instances
+    mkdir -p $NOVA_DIR/networks
+    exit
+fi
+[/code]
+
+<h2>Install command</h2>
+
+The following Debian packages are installed if not already installed:
+<ul>
+<li><b>python-software-properties</b>: This software provides an abstraction of the used apt repositories. It allows you to easily manage your distribution and independent software vendor software sources.</li>
+<li><b>dnsmasq-base</b>: A small caching DNS proxy and DHCP/TFTP server.</li>
+<li><b>kpartx</b>: create device mappings for partitions.</li>
+<li><b>kvm</b>: Full virtualization on x86 hardware.</li>
+<li><b>gawk</b>: a pattern scanning and processing language.</li>
+<li><b>iptables</b>: administration tools for packet filtering and NAT.</li>
+<li><b>ebtables</b>: Ethernet bridge frame table administration.</li>
+<li><b>user-mode-linux</b>: User-mode Linux (kernel).</li>
+<li><b>libvirt-bin</b>: the programs for the libvirt library.</li>
+<li><b>screen</b>: terminal multiplexor with VT100/ANSI terminal emulation.</li>
+<li><b>euca2ools</b>: managing cloud instances for Eucalyptus.</li>
+<li><b>vlan</b>: user mode programs to enable VLANs on your ethernet devices.</li>
+<li><b>curl</b>: Get a file from an HTTP, HTTPS or FTP server.</li>
+<li><b>rabbitmq-server</b>: An AMQP server written in Erlang.</li>
+<li><b>lvm2</b>: The Linux Logical Volume Manager.</li>
+<li><b>iscsitarget</b>: iSCSI Enterprise Target userland tools.</li>
+<li><b>open-iscsi</b>: High performance, transport independent iSCSI implementation.</li>
+<li><b>socat</b>: multipurpose relay for bidirectional data transfer.</li>
+<li><b>radvd</b>: Router Advertisement Daemon.</li>
+<li><b>python-twisted</b>: Event-based framework for internet applications.</li>
+<li><b>python-sqlalchemy</b>: SQL toolkit and Object Relational Mapper for Python.</li>
+<li><b>python-mox</b>: a mock object framework for Python.</li>
+<li><b>python-greenlet</b>: Lightweight in-process concurrent programming.</li>
+<li><b>python-carrot</b>: An AMQP messaging queue framework.</li>
+<li><b>python-migrate</b>: Database schema migration for SQLAlchemy.</li>
+<li><b>python-eventlet</b>: Eventlet is a concurrent networking library for Python.</li>
+<li><b>python-gflags</b>: Python implementation of the Google command line flags module.</li>
+<li><b>python-ipy</b>: Python module for handling IPv4 and IPv6 addresses and networks.</li>
+<li><b>python-cheetah</b>: text-based template engine and Python code generator.</li>
+<li><b>python-libvirt</b>: libvirt Python bindings.</li>
+<li><b>python-libxml2</b>: Python bindings for the GNOME XML library.</li>
+<li><b>python-routes</b>: Routing Recognition and Generation Tools.</li>
+<li><b>python-paste</b>: Tools for using a Web Server Gateway Interface stack.</li>
+<li><b>python-netaddr</b>: manipulation of various common network address notations.</li>
+<li><b>python-tempita</b>: very small text templating language.</li>
+<li><b>python-migrate</b>: Database schema migration for SQLAlchemy.</li>
+<li><b>python-pastedeploy</b>: Load, configure, and compose WSGI applications and servers.</li>
+<li><b>python-glance</b>: OpenStack Image Registry and Delivery Service.</li>
+</ul>
+
+The script also adds an APT repository: "ppa:nova-core/trunk" which contains some patched versions of some of the packages above.
+
+The modules kvm and ndb are loaded. iscsitarget and libvirt-bin are restarted and a test image is downloaded and uncompressed.
+
+If you enable IPv6 support, radvd will be installed, IPv6 forwarding will be enabled and router advertisement messages will be ignored.
+
+If you chose to use MySQL, the root password is set for you based on the environment variable MYSQL_PASS and the following 2 packages are installed: mysql-server and python-mysqldb.
+
+[code lang="bash"]
+if [ "$CMD" == "install" ]; then
+    sudo apt-get install -y python-software-properties
+    sudo add-apt-repository ppa:nova-core/trunk
+    sudo apt-get update
+    sudo apt-get install -y dnsmasq-base kpartx kvm gawk iptables ebtables
+    sudo apt-get install -y user-mode-linux kvm libvirt-bin
+    sudo apt-get install -y screen euca2ools vlan curl rabbitmq-server
+    sudo apt-get install -y lvm2 iscsitarget open-iscsi
+    sudo apt-get install -y socat
+    echo "ISCSITARGET_ENABLE=true" | sudo tee /etc/default/iscsitarget
+    sudo /etc/init.d/iscsitarget restart
+    sudo modprobe kvm
+    sudo /etc/init.d/libvirt-bin restart
+    sudo modprobe ndb
+    sudo apt-get install -y python-twisted python-sqlalchemy python-mox python- greenlet python-carrot
+    sudo apt-get install -y python-migrate python-eventlet python-gflags python-ipy python-tempita
+    sudo apt-get install -y python-libvirt python-libxml2 python-routes python-cheetah
+    sudo apt-get install -y python-netaddr python-paste python-pastedeploy python-glance
+    
+    if [ "$USE_IPV6" == 1 ]; then
+        sudo apt-get install -y radvd
+        sudo bash -c "echo 1 > /proc/sys/net/ipv6/conf/all/forwarding"
+        sudo bash -c "echo 0 > /proc/sys/net/ipv6/conf/all/accept_ra"
+    fi
+
+    if [ "$USE_MYSQL" == 1 ]; then
+        cat <<MYSQL_PRESEED | debconf-set-selections
+mysql-server-5.1 mysql-server/root_password password $MYSQL_PASS
+mysql-server-5.1 mysql-server/root_password_again password $MYSQL_PASS
+mysql-server-5.1 mysql-server/start_on_boot boolean true
+MYSQL_PRESEED
+        apt-get install -y mysql-server python-mysqldb
+    fi
+    mkdir -p $DIR/images
+    wget -c http://images.ansolabs.com/tty.tgz
+    tar -C $DIR/images -zxf tty.tgz
+    exit
+fi
+[/code]
+
+<h2>Run command</h2>
+
+A lot is happening in this section. First, based on the enviroment variables set above, the script writes the nova flags to nova.conf and creates the nova folder in /etc/.
+[code lang="bash"]
+cat >$NOVA_DIR/bin/nova.conf << NOVA_CONF_EOF
+--verbose
+--nodaemon
+--dhcpbridge_flagfile=$NOVA_DIR/bin/nova.conf
+--network_manager=nova.network.manager.$NET_MAN
+--cc_host=$HOST_IP
+--routing_source_ip=$HOST_IP
+--sql_connection=$SQL_CONN
+--auth_driver=nova.auth.$AUTH
+--libvirt_type=$LIBVIRT_TYPE
+NOVA_CONF_EOF
+
+if [ -n "$FLAT_INTERFACE" ]; then
+    echo "--flat_interface=$FLAT_INTERFACE" >>$NOVA_DIR/bin/nova.conf
+fi
+
+if [ "$USE_IPV6" == 1 ]; then
+    echo "--use_ipv6" >>$NOVA_DIR/bin/nova.conf
+fi
+[/code]
+
+Next, all dnsmasq processes are killed: DNS cache proxy +  DHCP server.
+[code lang="bash"]
+killall dnsmasq
+[/code]
+
+In case IPv6 support is enabled, radvd is killed:
+[code lang="bash"]
+if [ "$USE_IPV6" == 1 ]; then
+   killall radvd
+fi
+[/code]
+
+A new screen is started in detached mode with the session name "nova". Screen is a full-screen window manager that multiplexes a physical terminal between several processes.
+[code lang="bash"]
+screen -d -m -S nova -t nova
+[/code]
+
+The script recreates the database "nova".
+[code lang="bash"]
+if [ "$USE_MYSQL" == 1 ]; then
+    mysql -p$MYSQL_PASS -e 'DROP DATABASE nova;'
+    mysql -p$MYSQL_PASS -e 'CREATE DATABASE nova;'
+else
+    rm $NOVA_DIR/nova.sqlite
+fi
+[/code]
+
+If you decided to use LDAP, OpenLDAP or OpenDJ needs to be configured:
+[code lang="bash"]
+if [ "$USE_LDAP" == 1 ]; then
+    if [ "$USE_OPENDJ" == 1 ]; then
+        echo '--ldap_user_dn=cn=Directory Manager' >> \
+            /etc/nova/nova-manage.conf
+        sudo $NOVA_DIR/nova/auth/opendj.sh
+    else
+        sudo $NOVA_DIR/nova/auth/slap.sh
+    fi
+fi
+[/code]
+
+The script also recreates the instances and networks folders.
+[code lang="bash"]
+rm -rf $NOVA_DIR/instances
+mkdir -p $NOVA_DIR/instances
+rm -rf $NOVA_DIR/networks
+mkdir -p $NOVA_DIR/networks
+[/code]
+
+All VLANs are removed. Nova creates a VLAN for the project (VLAN id 100) and a bridge with this VLAN and the VM NIC. A DHCP server runs on this bridge to serve IP to the VM. The script clean-vlans brings down the bridge interface, deletes the bridge, brings down the VLAN interface and deletes the VLAN.
+[code lang="bash"]
+$NOVA_DIR/tools/clean-vlans
+[/code]
+
+A symbolic link is created pointing to the nova directory images directory:
+[code lang="bash"]
+if [ ! -d "$NOVA_DIR/images" ]; then
+    ln -s $DIR/images $NOVA_DIR/images
+fi
+[/code]
+
+If test mode is enabled (see above), the unit tests are run:
+[code lang="bash"]
+if [ "$TEST" == 1 ]; then
+    cd $NOVA_DIR
+    python $NOVA_DIR/run_tests.py
+    cd $DIR
+fi
+[/code]
+    
+A new database is created
+[code lang="bash"]
+$NOVA_DIR/bin/nova-manage db sync
+[/code]
+
+A new admin user is added:
+[code lang="bash"]
+$NOVA_DIR/bin/nova-manage user admin admin
+[/code]
+
+A new project "admin" managed by "admin" is created:
+[code lang="bash"]
+$NOVA_DIR/bin/nova-manage project create admin admin
+[/code]
+
+The project environment variables are exported to a file named: novarc
+[code lang="bash"]
+$NOVA_DIR/bin/nova-manage project environment admin admin $NOVA_DIR/novarc
+[/code]
+
+The file novarc looks like this for me. I am running things on Amazon EC2 right now. 10.240.95.3 is my EC2 instance private IP. The EC2 API server is listening on port 8773 and the OpenStack API is listening on port 8774. The data store will be running on port 3333.
+
+[code lang="bash"]
+NOVA_KEY_DIR=$(pushd $(dirname $BASH_SOURCE)>/dev/null; pwd; popd>/dev/null)
+export EC2_ACCESS_KEY="admin:admin"
+export EC2_SECRET_KEY="admin"
+export EC2_URL="http://10.240.95.3:8773/services/Cloud"
+export S3_URL="http://10.240.95.3:3333"
+export EC2_USER_ID=42 # nova does not use user id, but bundling requires it
+export EC2_PRIVATE_KEY=${NOVA_KEY_DIR}/pk.pem
+export EC2_CERT=${NOVA_KEY_DIR}/cert.pem
+export NOVA_CERT=${NOVA_KEY_DIR}/cacert.pem
+export EUCALYPTUS_CERT=${NOVA_CERT} # euca-bundle-image seems to require this set
+alias ec2-bundle-image="ec2-bundle-image --cert ${EC2_CERT} --privatekey ${EC2_PRIVATE_KEY} --user 42 --ec2cert ${NOVA_CERT}"
+alias ec2-upload-bundle="ec2-upload-bundle -a ${EC2_ACCESS_KEY} -s ${EC2_SECRET_KEY} --url ${S3_URL} --ec2cert ${NOVA_CERT}"
+export CLOUD_SERVERS_API_KEY="admin"
+export CLOUD_SERVERS_USERNAME="admin"
+export CLOUD_SERVERS_URL="http://10.240.95.3:8774/v1.0/"
+[/code]
+
+A small network is created with 32 IPs in a fixed range:
+[code lang="bash"]
+$NOVA_DIR/bin/nova-manage network create 10.0.0.0/8 1 32
+[/code]
+
+The different servers, controllers and stores are started and we can browse them through the screen session created above. See <a href="http://nova.openstack.org/nova.concepts.html">Nova Concepts and Introduction</a> for more details on the Nova architecture.
+[code lang="bash"]
+screen_it api "$NOVA_DIR/bin/nova-api"
+screen_it objectstore "$NOVA_DIR/bin/nova-objectstore"
+screen_it compute "$NOVA_DIR/bin/nova-compute"
+screen_it network "$NOVA_DIR/bin/nova-network"
+screen_it scheduler "$NOVA_DIR/bin/nova-scheduler"
+screen_it volume "$NOVA_DIR/bin/nova-volume"
+screen_it ajax_console_proxy "$NOVA_DIR/bin/nova-ajax-console-proxy"
+screen_it test ". $NOVA_DIR/novarc"
+screen -S nova -x
+[/code]
+
+Once the nova session is finished, the instances are terminated and the volumes deleted. This code is also run when the command "terminate" is used.
+[code lang="bash"]
+if [ "$CMD" == "run" ] || [ "$CMD" == "terminate" ]; then
+   # shutdown instances
+    . $NOVA_DIR/novarc; euca-describe-instances | grep i- | cut -f2 | xargs     euca-terminate-instances
+    sleep 2
+    # delete volumes
+    . $NOVA_DIR/novarc; euca-describe-volumes | grep vol- | cut -f2 | xargs -n1 euca-delete-volume
+    sleep 2
+fi
+[/code]
+
+The screen session is forced to shutdown. This part is also called when the command "clean" is executed.
+[code lang="bash"]
+if [ "$CMD" == "run" ] || [ "$CMD" == "clean" ]; then
+    screen -S nova -X quit
+    rm *.pid*
+fi
+[/code]
+
+There is one last command called "scrub" which is used to remove the bridges and VLANs configuration. It also destroys the domains.
+[code lang="bash"]
+if [ "$CMD" == "scrub" ]; then
+    $NOVA_DIR/tools/clean-vlans
+    if [ "$LIBVIRT_TYPE" == "uml" ]; then
+        virsh -c uml:///system list | grep i- | awk '{print \$1}' | xargs -n1   virsh -c uml:///system destroy
+    else
+        virsh list | grep i- | awk '{print \$1}' | xargs -n1 virsh destroy
+    fi
+fi
+[/code]
+
+When you run the branch, install and run commands, you end up with the different components (API server, object store, scheduler...) running which is really neat.
+
+You can use the screen windows to check each component status. Do a "man screen" to learn how to navigate between the different windows if you are not familiar with the tool screen.
+
+API server:
+[code lang="bash"]
+# /opt/novascript/trunk/bin/nova-api
+(nova.root 2011.1-LOCALBRANCH:LOCALREVISION): AUDIT [N/A] Starting /opt/novascript/trunk/bin/nova-api on 0.0.0.0:8774
+(nova.root 2011.1-LOCALBRANCH:LOCALREVISION): AUDIT [N/A] Starting /opt/novascript/trunk/bin/nova-api on 0.0.0.0:8773
+[/code]
+
+Object store:
+[code lang="bash"]
+(nova.root 2011.1-LOCALBRANCH:LOCALREVISION): DEBUG [N/A] network_topic : network from MainProcess (pid=13763) serve /opt/novascript/trunk/nova/twistd.py:266
+(nova.root 2011.1-LOCALBRANCH:LOCALREVISION): AUDIT [N/A] Starting nova-objectstore
+2011-01-14 22:15:09+0000 [-] Log opened.
+2011-01-14 22:15:09+0000 [-] twistd 10.0.0 (/usr/bin/python 2.6.5) starting up.
+2011-01-14 22:15:09+0000 [-] reactor class: twisted.internet.selectreactor.SelectReactor.
+2011-01-14 22:15:09+0000 [-] twisted.web.server.Site starting on 3333
+2011-01-14 22:15:09+0000 [-] Starting factory <twisted.web.server.Site instance at 0xaaf5bec>
+[/code]
+...
+
+You can launch a new instance this way:
+[code lang="bash"]
+cd /tmp/
+euca-add-keypair test > test.pem
+euca-run-instances -k test -t m1.tiny ami-tty
+[/code]
+
+You can list your instances this way:
+[code lang="bash"]
+# euca-describe-instances
+RESERVATION     r-ky6gm38t      admin
+INSTANCE        i-00000001      ami-tty        10.0.0.3        10.0.0.3        running test (admin, domU-12-31-39-04-58-F5)    0               m1.tiny 2011-01-14 22:32:03.466420      nova
+[/code]
+
+Running ifconfig, we can now see the bridge and VLAN created
+[code lang="bash"]
+br100     Link encap:Ethernet  HWaddr 12:31:39:04:58:f5  
+          inet addr:10.0.0.1  Bcast:10.0.0.31  Mask:255.255.255.224
+...
+vlan100   Link encap:Ethernet  HWaddr 12:31:39:04:58:f5  
+          inet6 addr: fe80::1031:39ff:fe04:58f5/64 Scope:Link
+...
+[/code]
+
+A network route has been set up for us to use the bridge interface when the packets are sent to 10.0.0.x:
+[code lang="bash"]
+# route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+10.0.0.0        0.0.0.0         255.255.255.224 U     0      0        0 br100
+...
+[/code]
+
+Voilà. Don't hesitate to post a comment if you have any feedback.
