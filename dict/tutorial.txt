@@ -32,27 +32,21 @@ Python dictionaries are implemented using hash tables. It is an array which inde
 
 We are going to assume that we are using strings as keys for the rest of this post. The hash function for strings in Python is defined as:
 
-[code lang="c"]
-static long
-string_hash(PyStringObject *a)
-{
-    register Py_ssize_t len;
-    register unsigned char *p;
-    register long x;
-
-    if (a->ob_shash != -1)
-        return a->ob_shash;
-    len = Py_SIZE(a);
-    p = (unsigned char *) a->ob_sval;
-    x = *p << 7;
-    while (--len >= 0)
-        x = (1000003*x) ^ *p++;
-    x ^= Py_SIZE(a);
-    if (x == -1)
-        x = -2;
-    a->ob_shash = x;
-    return x;
-}
+[code lang="text"]
+arguments: string object
+returns: hash
+function string_hash:
+    if hash cached:
+        return it
+    set len to string's length
+    initialize var p pointing to 1st char of string object
+    set x to value pointed by p left shifted by 7 bits
+    while len >= 0:
+        set var x to (1000003 * x) power value pointed by p
+        increment pointer p
+    set x to x power length of string object
+    cache x as the hash so we don't need to calculate it again
+    return x as the hash
 [/code]
 
 If you run hash('a') in Python, it will execute string_hash() and return 12416037344. Here we assume we are using a 64-bit machine.
@@ -71,12 +65,15 @@ Open addressing is a method of collision resolution where probing is used. In ca
 
 A quadratic probing sequence is used to find a free slot. The code is the following:
 
-[code lang="c"]
-for (perturb = hash; ; perturb >>= PERTURB_SHIFT) {
-  i = (i << 2) + i + perturb + 1;
-  // check if index = i & mask is free
-  ...
-}
+[code lang="text"]
+i is the current slot index
+set perturb to hash
+forever loop:
+  set i to i << 2 + i + perturb + 1
+  set slot index to i & mask
+  if slot is free:
+      return it
+  right shift perturb by 5 bits
 [/code]
 
 Let's see how this probing works when we start with i = 3:
@@ -121,39 +118,18 @@ struct _dictobject {
 
 <h2>Dictionary initialization</h2>
 
-When you first create a dictionary, the function PyDict_New() is called. I removed some of the lines to concentrate on the key concepts. This function allocates memory for a new dictionary object and initializes ma_fill and ma_used to 0, ma_mask to array's size - 1 = 8 - 1 = 7 and clears the structure ma_small_table which is our initial array of size 8. lookdict_string is the lookup function used by default and works for string keys which is what we are going to use in our example. Python dictionary also supports integers and tuples as keys.
+When you first create a dictionary, the function PyDict_New() is called. I removed some of the lines and converted the C code to pseudocode to concentrate on the key concepts.
 
-[code lang="c"]
-PyObject *
-PyDict_New(void)
-{
-    register PyDictObject *mp;
-    ...
-    if (numfree) {
-        ...
-    } else {
-        mp = PyObject_GC_New(PyDictObject, &PyDict_Type);
-        if (mp == NULL)
-            return NULL;
-        EMPTY_TO_MINSIZE(mp);
-        ...
-    }
-    ...
-    mp->ma_lookup = lookdict_string;
-    ...
-    return (PyObject *)mp;
-}
-
-#define INIT_NONZERO_DICT_SLOTS(mp) do {                                \
-    (mp)->ma_table = (mp)->ma_smalltable;                               \
-    (mp)->ma_mask = PyDict_MINSIZE - 1;                                 \
-    } while(0)
-
-#define EMPTY_TO_MINSIZE(mp) do {                                       \
-    memset((mp)->ma_smalltable, 0, sizeof((mp)->ma_smalltable));        \
-    (mp)->ma_used = (mp)->ma_fill = 0;                                  \
-    INIT_NONZERO_DICT_SLOTS(mp);                                        \
-    } while(0)
+[code lang="text"]
+returns new dictionary object
+function PyDict_New:
+    allocate new dictionary object
+    clear dictionary's table
+    set dictionary's number of used slots + dummy slots (ma_fill) to 0
+    set dictionary's number of active slots (ma_used) to 0
+    set dictionary's mask (ma_value) to dictionary size - 1 = 7
+    set dictionary's lookup function to lookdict_string
+    return allocated dictionary object
 [/code]
 
 <h2>Adding items</h2>
@@ -161,71 +137,52 @@ PyDict_New(void)
 When a new key/value pair is added, PyDict_SetItem() is called. This function takes a pointer to the dictionary object and the key/value pair. It checks if the key is a string and calculates the hash or reuses the one cached if it exists. insertdict() is called to add the new key/value pair and the dictionary is resized if the number of used slots is greater than 2/3 of the array's size.
 Why 2/3? It is to make sure the probing sequence can find a free slot fast enough. We will look at the resizing function later.
 
-[code lang="c"]
-int
-PyDict_SetItem(register PyObject *op, PyObject *key, PyObject *value)
-{
-    register PyDictObject *mp;
-    register long hash;
-    register Py_ssize_t n_used;
-
-    ...
-    mp = (PyDictObject *)op;
-    if (PyString_CheckExact(key)) {
-        hash = ((PyStringObject *)key)->ob_shash;
-        if (hash == -1)
-            hash = PyObject_Hash(key);
-    }
-    ...
-    n_used = mp->ma_used;
-    if (insertdict(mp, key, hash, value) != 0)
-        return -1;
-    if (!(mp->ma_used > n_used && mp->ma_fill*3 >= (mp->ma_mask+1)*2))
-        return 0;
-    return dictresize(mp, (mp->ma_used > 50000 ? 2 : 4) * mp->ma_used);
-}
+[code lang="text"]
+arguments: dictionary, key, value
+returns: 0 if OK or -1
+function PyDict_SetItem:
+    set mp to point to dictionary object
+    if key's hash cached:
+        use hash
+    else:
+        calculate hash
+    set n_used to dictionary's number of active slots (ma_used)
+    call insertdict with dictionary object, key, hash and value
+    if key/value pair added successfully and capacity over 2/3:
+        call dictresize to resize dictionary's table
 [/code]
 
-inserdict() uses the lookup function to find a free slot. This is the next function we are going to examine. lookdict_string() calculates the slot index using the hash and the mask values. If the slot is not free, it probes using the perturb loop we saw above. This function handles the case where the key/value pair already exists in the array.
+inserdict() uses the lookup function to find a free slot. This is the next function we are going to examine. lookdict_string() calculates the slot index using the hash and the mask values. If it cannot find the key in the slot index = hash & mask, it probes using the perturb loop we saw above.
 
-[code lang="c"]
-static PyDictEntry *
-lookdict_string(PyDictObject *mp, PyObject *key, register long hash)
-{
-    register size_t i;
-    register size_t perturb;
-    register PyDictEntry *freeslot;
-    register size_t mask = (size_t)mp->ma_mask;
-    PyDictEntry *ep0 = mp->ma_table;
-    register PyDictEntry *ep;
-
-    i = hash & mask;
-    ep = &ep0[i];
-    if (ep->me_key == NULL || ep->me_key == key)
-        return ep;
-    if (ep->me_key == dummy)
-        freeslot = ep;
-    else {
-        if (ep->me_hash == hash && _PyString_Eq(ep->me_key, key))
-            return ep;
-        freeslot = NULL;
-    }
-
-    for (perturb = hash; ; perturb >>= PERTURB_SHIFT) {
-        i = (i << 2) + i + perturb + 1;
-        ep = &ep0[i & mask];
-        if (ep->me_key == NULL)
-            return freeslot == NULL ? ep : freeslot;
-        if (ep->me_key == key
-            || (ep->me_hash == hash
-            && ep->me_key != dummy
-            && _PyString_Eq(ep->me_key, key)))
-            return ep;
-        if (ep->me_key == dummy && freeslot == NULL)
-            freeslot = ep;
-    }
-    ...
-}
+[code lang="text"]
+arguments: dictionary object, key, hash
+returns: dictionary entry
+function lookdict_string:
+    calculate slot index based on hash and mask
+    if slot's key matches or slot's key is not set:
+        returns slot's entry
+    if slot's key marked as dummy (was active):
+        set freeslot to this slot's entry
+    else:
+        if slot's hash equals to hash and slot's key equals to key:
+            return slot's entry
+        set var freeslot to null
+    we are here because we couldn't find the key so we start probing
+    set perturb to hash
+    forever loop:
+        set i to i << 2 + i + perturb + 1
+        calculate slot index based on i and mask
+        if slot's key is null:
+            if freeslot is null:
+                return slot's entry
+            else:
+                return freeslot
+        if slot's key equals to key or slot's hash equals to hash
+            and slot is not marked as dummy:
+            return slot's entry
+        if slot marked as dummy and freeslot is null:
+            set freeslot to slot's entry
+        right shift perturb by 5 bits
 [/code]
 
 We want to add the following key/value pairs: {'a': 1, 'b': 2', 'z': 26, 'y': 25, 'c': 5, 'x': 24}. This is what happens:
@@ -329,52 +286,23 @@ dictresize() is called with minused = 24 in our case which is 4 * ma_used. 2 * m
 
 The new table size needs to be greater than 24 and it is calculated by shifting the current size 1 bit left until it is greater than 24. It ends up being 32 e.g. 8 -> 16 -> 32.
 
-[code lang="c"]
-static int
-dictresize(PyDictObject *mp, Py_ssize_t minused)
-{
-    Py_ssize_t newsize;
-    PyDictEntry *oldtable, *newtable, *ep;
-    Py_ssize_t i;
-
-    ...
-    for (newsize = PyDict_MINSIZE;
-         newsize <= minused && newsize > 0;
-         newsize <<= 1)
-        ;
-    ...
-    oldtable = mp->ma_table;
-    ...
-
-    if (newsize == PyDict_MINSIZE) {
-        ...
-    }
-    else {
-        newtable = PyMem_NEW(PyDictEntry, newsize);
-        ...
-    }
-
-    ...
-    mp->ma_table = newtable;
-    mp->ma_mask = newsize - 1;
-    memset(newtable, 0, sizeof(PyDictEntry) * newsize);
-    mp->ma_used = 0;
-    i = mp->ma_fill;
-    mp->ma_fill = 0;
-
-    for (ep = oldtable; i > 0; ep++) {
-        if (ep->me_value != NULL) {
-            --i;
-            insertdict_clean(mp, ep->me_key, (long)ep->me_hash,
-                             ep->me_value);
-        }
-        else if (ep->me_key != NULL) {
-            ...
-        }
-    }
-    
-    ...
-    return 0;
+[code lang="text"]
+arguments: dictionary object, (2 or 4) * active slots
+returns: 0 if OK, -1 otherwise
+function dictresize:
+    calculate new dictionary size:
+        set var newsize to dictionary size
+        while newsize less or equal than (2 or 4) * active slots:
+            set newsize to newsize left shifted by 1 bit
+    set oldtable to dictionary's table
+    allocate new dictionary table
+    set dictionary's mask to newsize - 1
+    clear dictionary's table
+    set dictionary's active slots (ma_used) to 0
+    set var i to dictionary's active + dummy slots (ma_fill)
+    set dictionary's active + dummy slots (ma_fill) to 0
+    copy oldtable entries to dictionary's table using new mask
+    return 0
 }
 [/code]
 
@@ -386,32 +314,21 @@ This is what happens with our table during resizing: a new table of size 32 is a
 
 PyDict_DelItem() is called to remove an entry. The hash for this key is calculated and the lookup function is called to return the entry. The key for this entry is set to the dummy key. Dummy entries are entries which contained a key in the past but have not been reused yet. The probe sequence use the dummy information in case of collision to know that those entries held an active pair in the past.
 
-[code lang="c"]
-int
-PyDict_DelItem(PyObject *op, PyObject *key)
-{
-    register PyDictObject *mp;
-    register long hash;
-    register PyDictEntry *ep;
-
-    ...
-    if (!PyString_CheckExact(key) ||
-        (hash = ((PyStringObject *) key)->ob_shash) == -1) {
-        hash = PyObject_Hash(key);
-        if (hash == -1)
-            return -1;
-    }
-    mp = (PyDictObject *)op;
-    ep = (mp->ma_lookup)(mp, key, hash);
-    if (ep == NULL)
-        return -1;
-    ...
-    ep->me_key = dummy;
-    ep->me_value = NULL;
-    mp->ma_used--;
-    ...
-    return 0;
-}
+[code lang="text"]
+arguments: dictionary object, key
+returns 0 if OK, -1 otherwise
+function PyDict_DelItem:
+    if key's hash cached:
+        use hash
+    else:
+        calculate hash
+    look for key in dictionary using hash
+    if slot not found:
+        return -1
+    set slot's key to dummy
+    set slot's value to null
+    decrement dictionary active slots 
+    return 0
 [/code]
 
 We want to remove the key 'c' from our dictionary. We end up with the following array:
