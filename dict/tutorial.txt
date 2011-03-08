@@ -28,7 +28,7 @@ The key 'd' does not exist so a KeyError exception is raised.
 
 <h2>Hash tables</h2>
 
-Python dictionaries are implemented using hash tables. It is an array which indexes are obtain using a hash function on the keys. The goal of a hash function is to distribute the keys evenly in the array. A good hash function minimizes the number of collisions e.g. different keys having the same hash.
+Python dictionaries are implemented using hash tables. It is an array whose indexes are obtained using a hash function on the keys. The goal of a hash function is to distribute the keys evenly in the array. A good hash function minimizes the number of collisions e.g. different keys having the same hash.
 
 We are going to assume that we are using strings as keys for the rest of this post. The hash function for strings in Python is defined as:
 
