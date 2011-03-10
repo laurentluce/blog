@@ -1,0 +1,391 @@
+This post describes how to solve mazes using 2 algorithms implemented in Python: a simple recursive algorithm and the A* search algorithm.
+
+<h2>Maze</h2>
+
+The maze we are going to use in this article is 6 cells by 6 cells. The walls are colored in blue. The starting  cell is at the bottom left (x=0 and y=0) colored in green. The ending cell is at the top right (x=5 and y=5) colored in green. We can only move horizontally or vertically 1 cell at a time.
+
+<img src="/images/blog/maze/maze.png" alt="Python algorithms for mazes">
+
+<h2>Recursive walk</h2>
+
+We use a nested list of integers to represent the maze. The values are the following:
+<ul>
+  <li>0: empty cell</li>
+  <li>1: unreachable cell: e.g. wall</li>
+  <li>2: ending cell</li>
+  <li>3: visited cell</li>
+</ul>
+
+[code lang="python"]
+grid = [[0, 0, 0, 0, 0, 1],
+        [1, 1, 0, 0, 0, 1],
+        [0, 0, 0, 1, 0, 0],
+        [0, 1, 1, 0, 0, 1],
+        [0, 1, 0, 0, 1, 0],
+        [0, 1, 0, 0, 0, 2]]
+[/code]
+
+This is a very simple algorithm which does the job even if it is not an efficient algorithm. It walks the maze recursively by visiting each cell and avoiding walls and already visited cells.
+
+The search function accepts the coordinates of a cell to explore. If it is the ending cell, it returns True. If it is a wall or an already visited cell, it returns False. The neighboring cells are explored recursively and if nothing is found at the end, it returns False so it backtracks to explore new paths. We start at cell x=0 and y=0.
+
+[code lang="python"]
+def search(x, y):
+  if grid[x][y] == 2:
+    print 'found at %d,%d' % (x, y)
+    return True
+  elif grid[x][y] == 1:
+    print 'wall at %d,%d' % (x, y)
+    return False
+  elif grid[x][y] == 3:
+    print 'visited at %d,%d' % (x, y)
+    return False
+  
+  print 'visiting %d,%d' % (x, y)
+
+  # mark as visited
+  grid[x][y] = 3
+
+  # explore neighbors clockwise starting by the one on the right
+  if ((x < len(grid)-1 and search(x+1, y))
+    or (y > 0 and search(x, y-1))
+    or (x > 0 and search(x-1, y))
+    or (y < len(grid)-1 and search(x, y+1))):
+    return True
+
+  return False
+
+search(0, 0)
+[/code]
+
+Let's see what happens when we run the script.
+
+[code lang="bash"]
+$ python maze.py
+visiting 0,0
+wall at 1,0
+visiting 0,1
+wall at 1,1
+visited at 0,0
+visiting 0,2
+...
+[/code]
+
+First cell visited is (0,0). Its neighbors are explored starting by the one on the right (1,0). search(1,0) returns False because it is a wall. There is no cell below and on the left so the one at the top (0,1) is explored. Right of that is a wall and below is already visited so the one at the top (0,2) is explored. This is what we have so far:
+
+<img src="/images/blog/maze/maze_rec_1a.png" alt="Python algorithms for mazes">
+
+Because the neighbor on the right is explored first, this algorithm is going to explore the dead-end at the bottom-right first.
+
+[code lang="bash"]
+...
+visiting 1,2
+visiting 2,2
+wall at 3,2
+visiting 2,1
+wall at 3,1
+visiting 2,0
+visiting 3,0
+visiting 4,0
+visiting 5,0
+...
+[/code]
+
+<img src="/images/blog/maze/maze_rec_1b.png" alt="Python algorithms for mazes">
+
+The algorithm is going to backtrack because there is nothing else to explore as we are in a dead-end and we are going to end up at cell (1, 2) again where there is more to explore.
+
+[code lang="bash"]
+...
+visited at 4,0
+wall at 5,1
+visited at 3,0
+wall at 4,1
+visited at 2,0
+wall at 3,1
+wall at 1,0
+visited at 2,1
+wall at 1,1
+visited at 2,2
+visited at 1,2
+wall at 2,3
+wall at 1,1
+visited at 0,2
+visiting 1,3
+...
+[/code]
+
+<img src="/images/blog/maze/maze_rec_1c.png" alt="Python algorithms for mazes">
+
+Let's continue, we end up in a second dead-end at cell (4, 2).
+
+[code lang="bash"]
+...
+wall at 2,3
+visited at 1,2
+visiting 0,3
+visited at 1,3
+visited at 0,2
+visiting 0,4
+visiting 1,4
+visiting 2,4
+visiting 3,4
+wall at 4,4
+visiting 3,3
+visiting 4,3
+visiting 5,3
+visiting 5,2
+wall at 5,1
+visiting 4,2
+visited at 5,2
+wall at 4,1
+wall at 3,2
+visited at 4,3
+...
+[/code]
+
+<img src="/images/blog/maze/maze_rec_2.png" alt="Python algorithms for mazes">
+
+Backtracking happens one more time to go back to cell (5, 3) and we are now on our way to the exit.
+
+[code lang="bash"]
+...
+visiting 5,4
+visited at 5,3
+wall at 4,4
+found at 5,5
+[/code]
+
+<img src="/images/blog/maze/maze_rec_3a.png" alt="Python algorithms for mazes">
+
+The full walk looks like this:
+
+<img src="/images/blog/maze/maze_rec_3b.png" alt="Python algorithms for mazes">
+
+<h2>A* search</h2>
+
+We are going to look at a more sophisticated algorithm called A* search. This is based on costs to move around the grid. Let's assume the cost to move horizontally or vertically 1 cell is equal to 10. Again, we cannot move diagonally here.
+
+Before we start describing the algorithm, let's define 2 variables: G and H. G is the cost to move from the starting cell to a given cell.
+
+<img src="/images/blog/maze/a_star_g.png" alt="Python algorithms for mazes">
+
+H is an estimation of the cost to move from a given cell to the ending cell. How do we calculate that if we don't know the path to the ending cell? To simplify, we just calculate the distance if no walls were present. There are other ways to do the estimation but this one is good enough for this example.
+
+<img src="/images/blog/maze/a_star_h.png" alt="Python algorithms for mazes">
+
+We use 2 lists: an open list containing the cells to explore and a closed list containing the processed cells. We start with the starting cell in the open list and nothing in the closed list.
+
+Let's follow 1 round of this algorithm by processing our first cell from the open list. It is the starting cell. We remove it from the list and append it to the closed list. We retrieve the list of adjacent cells and we start processing them. The starting cell has 2 adjacent cells: (1, 0) and (0, 1). (1, 0) is a wall so we drop that one. (0, 1) is reachable and not in the closed list so we process it. We calculate G and H for it. G = 10 as we just need to move 1 cell up from the starting cell. H = 90: 5 cells right and 4 cells up to reach the ending cell. We call the sum F = G + H = 10 + 90 = 100. We set the parent of this adjacent cell to be the cell we just removed from the open list: e.g. (0, 0). Finally, we add this adjacent cell to the open list. This is what we have so far. The arrow represents the pointer to the parent cell.
+
+<img src="/images/blog/maze/a_star_2.png" alt="Python algorithms for mazes">
+
+We continue with the cell in the open list having the lowest F = G + H. Only one cell is in the open list so it makes it easy. We remove it from the open list and we get its adjacent cells. Again, only one adjacent cell is reachable: (0, 2). We end up with the following after this 2nd round.
+
+<img src="/images/blog/maze/a_star_3.png" alt="Python algorithms for mazes">
+
+3nd round result looks like this:
+
+<img src="/images/blog/maze/a_star_4.png" alt="Python algorithms for mazes">
+
+Let's detail the next round. We have 2 cells in the open list: (1, 2) and (0, 3). Both have the same F value so we pick the last one added which is (0, 3). This cell has 3 reachable adjacent cells: (1, 3), (0, 2) and (0, 4). We process (1, 3) and (0, 4). (0, 2) is in the closed list so we don't process that one again. We end up with:
+
+<img src="/images/blog/maze/a_star_5.png" alt="Python algorithms for mazes">
+
+Let's fast forward to:
+
+<img src="/images/blog/maze/a_star_6.png" alt="Python algorithms for mazes">
+
+We have (1, 2), (1, 3) and (3, 3) in the open list. (1, 3) is processed next because it is the last one added with the lowest F value = 100. (1, 3) has 1 adjacent cell which is not in the closed list. It is (1, 2) which is in the open list. When an adjacent cell is in the open list, we check if its F value would be less if the path taken was going through the cell currently processed e.g. through (1, 3). Here it is not the case so we don't update G and H of (1, 2) and its parent. This trick makes the algorithm more efficient when this condition exists.
+
+Let's take a break and look at a diagram representing the algorithm steps and conditions:
+
+<img src="/images/blog/maze/a_star_1.png" alt="Python algorithms for mazes">
+
+We continue processing the cells remaining in the open list. Fast forward to:
+
+<img src="/images/blog/maze/a_star_7.png" alt="Python algorithms for mazes">
+
+We have 2 cells in the open list: (3, 3) and (2, 0). The next cell removed from the open list is (3, 3) because its F is equal to 120. This proves that this algorithm is better than the first one we saw. We don't end up exploring the dead end at (5, 0) and we continue walking from (3, 3) instead which is better.
+
+Fast forward again to:
+
+<img src="/images/blog/maze/a_star_8.png" alt="Python algorithms for mazes">
+
+The next cell processed from the open list is (5, 5) and it is the ending cell so we have found our path. It is easy to display the path. We just have to follow the parent pointers up to the starting cell. Our path is highlighted in red on the following diagram:
+
+<img src="/images/blog/maze/a_star_9.png" alt="Python algorithms for mazes">
+
+You can read more about this algorithm <a href="http://en.wikipedia.org/wiki/A*_search_algorithm">here</a>.
+
+<h2>A* implementation</h2>
+
+The basic object here is a cell so we write a class for it.
+
+[code lang="python"]
+class Cell(object):
+  def __init__(self, x, y, reachable):
+    """
+    Initialize new cell
+
+    @param x cell x coordinate
+    @param y cell y coordinate
+    @param reachable is cell reachable? not a wall?
+    """
+    self.reachable = reachable
+    self.x = x
+    self.y = y
+    self.parent = None
+    self.g = 0
+    self.h = 0
+[/code]
+
+Next is our main class named AStar. Attributes are the open list, the closed list, the cells list (grid definition), the size of the grid.
+
+[code lang="python"]
+class AStar(object):
+  def __init__(self):
+    self.op = []
+    self.cl = []
+    self.cells = []
+    self.gridHeight = 6
+    self.gridWidth = 6
+  ...
+[/code]
+
+We create a simple method initializing the list of cells to match our example with the walls at the same locations.
+
+[code lang="python"]
+  def init_grid(self):
+    walls = ((0, 5), (1, 0), (1, 1), (1, 5), (2, 3), 
+             (3, 1), (3, 2), (3, 5), (4, 1), (4, 4), (5, 1))
+    for x in range(self.gridWidth):
+      for y in range(self.gridHeight):
+        if (x, y) in walls:
+          reachable = False
+        else:
+          reachable = True
+        self.cells.append(Cell(x, y, reachable))
+    self.start = self.get_cell(0, 0)
+    self.end = self.get_cell(5, 5)
+[/code]
+
+Our heuristic compute method:
+
+[code lang="python"]
+  def get_heuristic(self, cell):
+    """
+    Compute the heuristic value H for a cell: distance between
+    this cell and the ending cell multiply by 10.
+
+    @param cell
+    @returns heuristic value H
+    """
+    return 10 * (abs(cell.x - self.end.x) + abs(cell.y - self.end.y))
+[/code]
+
+We need a method to return a particular cell based on x and y coordinates.
+
+[code lang="python"]
+  def get_cell(self, x, y):
+    """
+    Returns a cell from the cells list
+
+    @param x cell x coordinate
+    @param y cell y coordinate
+    @returns cell
+    """
+    return self.cells[x * self.gridHeight + y]
+[/code]
+
+Next is a method to retrieve the list of adjacent cells to a specific cell.
+
+[code lang="python"]
+  def get_adjacent_cells(self, cell):
+    """
+    Returns adjacent cells to a cell. Clockwise starting
+    from the one on the right.
+
+    @param cell get adjacent cells for this cell
+    @returns adjacent cells list 
+    """
+    cells = []
+    if cell.x < self.gridWidth-1:
+      cells.append(self.get_cell(cell.x+1, cell.y))
+    if cell.y > 0:
+      cells.append(self.get_cell(cell.x, cell.y-1))
+    if cell.x > 0:
+      cells.append(self.get_cell(cell.x-1, cell.y))
+    if cell.y < self.gridHeight-1:
+      cells.append(self.get_cell(cell.x, cell.y+1))
+    return cells
+[/code]
+
+At the beginning of each round, a new cell is retrieved from the open list based on its F = G + H value. If there are multiple cells with the same lowest value, we return the last one added e.g. closest to the end of the list.
+
+[code lang="python"]
+  def get_next_cell(self):
+    """
+    Returns the latest cell added with the lowest F value
+
+    @returns cell
+    """
+    min_f = float('infinity')
+    cell = None
+    for n in self.op:
+      if n.g + n.h <= min_f:
+        min_f = n.g + n.h
+        cell = n
+    ret = cell
+    if cell:
+      self.op.remove(cell)
+    return ret
+[/code]
+
+Simple method to print the path found. It follows the parent pointers to go from the ending cell to the starting cell.
+
+[code lang="python"]
+  def display_path(self):
+    cell = self.end
+    while cell.parent is not self.start:
+      cell = cell.parent
+      print 'path: cell: %d,%d' % (cell.x, cell.y)
+[/code]
+
+The main method implements the algorithm itself.
+
+[code lang="python"]
+  def process(self):
+    # add starting cell to open list
+    self.op.append(self.start)
+    cell = self.get_next_cell()
+    while cell:
+      # add cell to closed list so we don't process it twice
+      self.cl.append(cell)
+      # if ending cell, display found path
+      if cell is self.end:
+        self.display_path()
+        break
+      # get adjacent cells for cell
+      adj_cells = self.get_adjacent_cells(cell)
+      for n in adj_cells:
+        if n.reachable and n not in self.cl:
+          if n in self.op:
+            # if adj cell in open list, check if current path is
+            # better than the one previously found for this adj cell.
+            if n.g > cell.g + 10:
+              n.g = cell.g + 10
+              n.h = get_heuristic(n)
+              n.parent = cell
+          else:
+            n.parent = cell
+            n.h = self.get_heuristic(n)
+            n.g = cell.g + 10
+            # add adj cell to open list
+            self.op.append(n)
+      # get next cell from open list with lowest F value.
+      cell = self.get_next_cell()
+[/code]
+
+That's it for now. I hope you enjoyed the article. Please write a comment if you have any feedback.
+
