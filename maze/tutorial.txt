@@ -220,7 +220,7 @@ You can read more about this algorithm <a href="http://en.wikipedia.org/wiki/A*_
 
 <h2>A* implementation</h2>
 
-The basic object here is a cell so we write a class for it.
+The basic object here is a cell so we write a class for it. We store the coordinates x and y, the values of G and H plus the sum F.
 
 [code lang="python"]
 class Cell(object):
@@ -238,15 +238,17 @@ class Cell(object):
     self.parent = None
     self.g = 0
     self.h = 0
+    self.f = 0
 [/code]
 
-Next is our main class named AStar. Attributes are the open list, the closed list, the cells list (grid definition), the size of the grid.
+Next is our main class named AStar. Attributes are the open list heapified (keep cell with lowest F at the top), the closed list which is a set for fast lookup, the cells list (grid definition) and the size of the grid.
 
 [code lang="python"]
 class AStar(object):
   def __init__(self):
     self.op = []
-    self.cl = []
+    heapq.heapify(self.op)
+    self.cl = set()
     self.cells = []
     self.gridHeight = 6
     self.gridWidth = 6
@@ -321,27 +323,6 @@ Next is a method to retrieve the list of adjacent cells to a specific cell.
     return cells
 [/code]
 
-At the beginning of each round, a new cell is retrieved from the open list based on its F = G + H value. If there are multiple cells with the same lowest value, we return the last one added e.g. closest to the end of the list.
-
-[code lang="python"]
-  def get_next_cell(self):
-    """
-    Returns the latest cell added with the lowest F value
-
-    @returns cell
-    """
-    min_f = float('infinity')
-    cell = None
-    for n in self.op:
-      if n.g + n.h <= min_f:
-        min_f = n.g + n.h
-        cell = n
-    ret = cell
-    if cell:
-      self.op.remove(cell)
-    return ret
-[/code]
-
 Simple method to print the path found. It follows the parent pointers to go from the ending cell to the starting cell.
 
 [code lang="python"]
@@ -352,39 +333,50 @@ Simple method to print the path found. It follows the parent pointers to go from
       print 'path: cell: %d,%d' % (cell.x, cell.y)
 [/code]
 
+We need a method to calculate G and H and set the parent cell.
+
+[code lang="python"]
+  def update_cell(self, adj, cell):
+    """
+    Update adjacent cell
+
+    @param adj adjacent cell to current cell
+    @param cell current cell being processed
+    """
+    adj.g = cell.g + 10
+    adj.h = self.get_heuristic(adj)
+    adj.parent = cell
+    adj.f = adj.h + adj.g
+[/code]
+
 The main method implements the algorithm itself.
 
 [code lang="python"]
   def process(self):
-    # add starting cell to open list
-    self.op.append(self.start)
-    cell = self.get_next_cell()
-    while cell:
+    # add starting cell to open heap queue
+    heapq.heappush(self.op, (self.start.f, self.start))
+    while len(self.op):
+      # pop cell from heap queue 
+      h, cell = heapq.heappop(self.op)
       # add cell to closed list so we don't process it twice
-      self.cl.append(cell)
+      self.cl.add(cell)
       # if ending cell, display found path
       if cell is self.end:
         self.display_path()
         break
       # get adjacent cells for cell
       adj_cells = self.get_adjacent_cells(cell)
-      for n in adj_cells:
-        if n.reachable and n not in self.cl:
-          if n in self.op:
+      for c in adj_cells:
+        if c.reachable and c not in self.cl:
+          if c in self.op:
             # if adj cell in open list, check if current path is
             # better than the one previously found for this adj cell.
-            if n.g > cell.g + 10:
-              n.g = cell.g + 10
-              n.h = get_heuristic(n)
-              n.parent = cell
+            if c.g > cell.g + 10:
+              self.update_cell(c, cell)
           else:
-            n.parent = cell
-            n.h = self.get_heuristic(n)
-            n.g = cell.g + 10
+            self.update_cell(c, cell)
             # add adj cell to open list
-            self.op.append(n)
-      # get next cell from open list with lowest F value.
-      cell = self.get_next_cell()
+            heapq.heappush(self.op, (c.f, c))
 [/code]
 
 That's it for now. I hope you enjoyed the article. Please write a comment if you have any feedback.
