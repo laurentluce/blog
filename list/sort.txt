@@ -1,0 +1,77 @@
+list: 3, 4, 1, ... 
+
+saved_ob_size = 130
+saved_allocated = 130 
+
+size = 0;
+self->ob_item = NULL;
+self->allocated = -1;
+
+MergeState:
+ms->compare = compare;
+ms->a = ms->temparray;
+ms->alloced = 256
+ms->n = 0;
+ms->min_gallop = 7
+
+nremaining = 130
+
+finding natural runs:
+    
+lo = saved_ob_item = 0
+hi = lo + 130
+minrun = merge_compute_minrun(130) = 33
+
+loop:
+  count_run -> returns 2: 3 <= 4
+  n = 2 < 33
+  force = 33
+  binarysort(lo, lo + 33, lo + 2, compare)
+  n = 33
+  ms.pending[0].base = 0
+  ms.pending[0].len = 33
+  lo = 33
+  nremaining = 97
+  
+  count_run -> returns 2: ...
+  n = 2 < 33
+  force = 33
+  binarysort(lo, lo + 33, lo + 2, compare)
+  n = 33
+  ms.pending[1].base = 33 
+  ms.pending[1].len = 33
+  lo = 66
+  nremaining = 64
+
+  count_run -> returns 2: ...
+  n = 2 < 33
+  force = 33
+  binarysort(lo, lo + 33, lo + 2, compare)
+  n = 33
+  ms.pending[2].base = 66 
+  ms.pending[2].len = 33
+  lo = 99
+  nremaining = 31
+
+  count_run -> returns 2: ...
+  n = 2 < 33
+  force = 31
+  binarysort(lo, lo + 31, lo + 2, compare)
+  n = 31
+  ms.pending[3].base = 99 
+  ms.pending[3].len = 31
+  lo = 130
+  nremaining = 0
+
+marge_at: ms.pending[0] and ms.pending[1]
+          ms.pending[0].base = 0
+          ms.pending[0].len = 66
+
+marge_at: ms.pending[0] and ms.pending[1]
+          ms.pending[0].base = 0
+          ms.pending[0].len = 99
+
+marge_at: ms.pending[0] and ms.pending[1]
+          ms.pending[0].base = 0
+          ms.pending[0].len = 130
+

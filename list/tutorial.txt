@@ -1,0 +1,196 @@
+This post describes how lists are implemented in the Python language.
+
+Lists in Python are powerful and it is interesting to see how they are implemented internally.
+
+Following is a simple Python script appending some integers to a list and printing them.
+
+[code lang="bash"]
+>>> l = []
+>>> l.append(1)
+>>> l.append(2)
+>>> l.append(3)
+>>> l
+[1, 2, 3]
+>>> for e in l:
+...   print e
+... 
+1
+2
+3
+[/code]
+
+As you can see, list are iterable.
+
+<h2>List object C structure</h2>
+
+A list object in Python is represented by the following C structure. ob_item is a list of pointers to the list elements. allocated is the number of slots allocated in memory.
+
+[code lang="c"]
+typedef struct {
+    PyObject_VAR_HEAD
+    PyObject **ob_item;
+    Py_ssize_t allocated;
+} PyListObject;
+[/code]
+
+<h2>List initialization</h2>
+
+Let's look at what happens when we initialize an empty list. e.g. l = [].
+
+[code lang="text"]
+arguments: size of the list = 0
+returns: list object = []
+PyListNew:
+  nbytes = size * size of global Python object = 0
+  allocate new list object
+  allocate list of pointers (ob_item) of size nbytes = 0
+  clear ob_item
+  set list's allocated var to 0 = 0 slots
+  return list object 
+[/code]
+
+It is important to notice the difference between allocated slots and the size of the list. The size of a list is the same as len(l). The number of allocated slots is what has been allocated in memory. Often, you will see that allocated can be greater than size. This is to avoid needing calling realloc each time a new elements is appended to the list. We will see more about that later.
+
+<h2>Append</h2>
+
+We append an integer to the list: l.append(1). What happens? The internal C function app1() is called:
+
+[code lang="text"]
+arguments: list object, new element
+returns: 0 if OK, -1 if not
+app1:
+    n = size of list
+    call list_resize() to resize the list to size n+1 = 0 + 1 = 1
+    list[n] = list[0] = new element
+    return 0
+[/code]
+
+Let's look at list_resize(). It over-allocates memory to avoid calling list_resize too many time. The growth pattern of the list is:  0, 4, 8, 16, 25, 35, 46, 58, 72, 88, ...
+
+[code lang="text"]
+arguments: list object, new size
+returns: 0 if OK, -1 if not
+list_resize:
+    new_allocated = (newsize >> 3) + (newsize < 9 ? 3 : 6) = 3
+    new_allocated += newsize = 3 + 1 = 4
+    resize ob_item (list of pointers) to size new_allocated
+    return 0
+[/code]
+
+4 slots are now allocated to contain elements and the first one is the integer 1. You can see on the following diagram that l[0] points to the integer object that we just appended. The dashed squares represent the slots allocated but not used yet.
+
+<img src="/images/blog/list/list.png" alt="Python lists">
+
+We continue by adding one more element: l.append(2). list_resize is called with n+1 = 2 but because the allocated size is 4, there is no need to allocate more memory. Same thing happens when we add 2 more integers: l.append(3), l.append(4). The following diagram shows what we have so far. 
+
+<img src="/images/blog/list/list_4.png" alt="Python lists">
+
+<h2>Insert</h2>
+
+Let's insert a new integer (5) at position 1: l.insert(1,5) and look at what happens internally. ins1() is called:
+
+[code lang="text"]
+arguments: list object, where, new element
+returns: 0 if OK, -1 if not
+ins1:
+    resize list to size n+1 = 5 -> 4 more slots will be allocated
+    starting at the last element up to the offset where, right shift each element 
+    set new element at offset where
+    return 0
+[/code]
+
+<img src="/images/blog/list/list_insert.png" alt="Python lists">
+
+The dashed squares represent the slots allocated but not used yet. Here, 8 slots are allocated but the size or length of the list is only 5.
+
+<h2>Pop</h2>
+
+When you pop the last element: l.pop(), listpop() is called. list_resize is called inside listpop() and if the new size is less than half of the allocated size then the list is shrunk.
+
+[code lang="text"]
+arguments: list object
+returns: element popped
+listpop:
+    if list empty:
+        return null
+    resize list with size 5 - 1 = 4. 4 is not less than 8/2 so no shrinkage
+    set list object size to 4
+    return last element
+[/code]
+
+<img src="/images/blog/list/list_pop.png" alt="Python lists">
+
+You can observe that slot 4 still points to the integer but the important thing is the size of the list which is now 4. 
+
+Let's pop one more element. In list_resize(), size - 1 = 4 - 1 = 3 is less than half of the allocated slots so the list is shrunk to 6 slots and the new size of the list is now 3.
+
+You can observe that slot 3 and 4 still point to some integers but the important thing is the size of the list which is now 3. 
+
+<img src="/images/blog/list/list_pop_2.png" alt="Python lists">
+
+<h2>Remove</h2>
+
+Python list object has a method to remove a specific element: l.remove(5). listremove() is called.
+
+[code lang="text"]
+arguments: list object, element to remove
+returns none if OK, null if not
+listremove:
+    loop through each list element:
+        if correct element:
+            slice list between element's slot and element's slot + 1
+            return none
+    return null
+[/code]
+
+To slice the list and remove the element, list_ass_slice() is called and it is interesting to see how it works. Here, low offset is 1 and high offset is 2 as we are removing the element 5 at position 1.
+
+[code lang="text"]
+arguments: list object, low offset, high offset
+returns: 0 if OK
+list_ass_slice:
+    copy integer 5 to recycle list to dereference it
+    shift elements from slot 2 to slot 1
+    resize list to 5 slots
+    return 0
+[/code]
+
+<img src="/images/blog/list/list_remove.png" alt="Python lists">
+
+<h2>Sort</h2>
+
+We are going to use a list with 130 elements to see how the sorting algorithm works. Anything below 64 elements is quickly sorted using a binary sort insertion so it is not as interesting to look at. Once you have more than 64 elements, merging is involved and it gives us a better overview of the algorithm.
+
+Let's create a list with 130 elements from 0 to 129. We shuffle it to make the sort worth it. 
+[code lang="bash"]
+>>> import random
+>>> l = [n for n in range(130)]
+>>> random.shuffle(l)
+>>> l
+[107, 44, 97, 121, 26, 11, 24, 100, 79, 19, 109, 7, 52, 93, 70, 94, 124, 117, 92, 32, 115, 83, 9, 112, 84, 22, 65, 95, 89, 74, 64, 23, 101, 68, 119, 127, 90, 80, 91, 75, 4, 20, 114, 16, 103, 34, 96, 125, 47, 77, 81, 3, 30, 14, 25, 29, 104, 102, 98, 69, 78, 60, 33, 12, 31, 37, 76, 10, 5, 105, 35, 48, 85, 106, 63, 71, 54, 39, 8, 6, 62, 67, 42, 72, 118, 116, 27, 46, 38, 99, 126, 40, 28, 113, 43, 41, 59, 2, 56, 61, 88, 18, 45, 128, 58, 73, 1, 13, 129, 49, 0, 82, 123, 111, 57, 86, 110, 51, 15, 36, 120, 108, 66, 55, 53, 87, 122, 17, 21, 50]
+[/code]
+
+First step is to find natural runs: e.g. l[i] <= l[i+1] <= ... or l[i] > l[i+1] > ... Because we are using a very random list, natural runs are going to be short. Natural runs need to have a minimum length dictated by the length of the list. merge_compute_minrun() returns the minimum length of a run based on the length of the list. In our case, the minimum run is equal to 33. Any natural run of length less than 33 will be boosted by using a binary sort insertion to end up with a sorted run of length 33.
+
+l[0] >= l[1] and then it breaks as l[2] > l[1] so our first run is 2. Not very good but we knew this will be the case as we are using random.shuffle() to shuffle our list. In real life, natural runs occur more often and it makes this sort much more efficient than in our very random example.
+
+First natural run has a length of 2 so we boost it to length 33 using a binary sort insertion. Once this is done, the merge state structure is used to keep track of the different runs. First run starts at offset 0 and has a length of 33. It looks like this: [7, 9, 11, 19, 22, 23, 24, 26, 32, 44, 52, 64, 65, 70, 74, 79, 83, 84, 89, 92, 93, 94, 95, 97, 100, 101, 107, 109, 112, 115, 117, 121, 124].
+
+We are now looking at l[33] and after. The natural run is only of length 3: l[33] < l[34] < l[35] so binary sort insertion is used here again and the second run looks like this after sorting: [3, 4, 12, 14, 16, 20, 25, 29, 30, 31, 33, 34, 37, 47, 60, 68, 69, 75, 77, 78, 80, 81, 90, 91, 96, 98, 102, 103, 104, 114, 119, 125, 127].
+
+We continue and get a 3rd run of length 33 and the last run has length of 31.
+
+1st run: [7, 9, 11, 19, 22, 23, 24, 26, 32, 44, 52, 64, 65, 70,  74, 79, 83, 84, 89, 92, 93, 94, 95, 97, 100, 101, 107, 109, 112, 115, 117, 121, 124]
+2nd run: [3, 4, 12, 14, 16, 20, 25, 29, 30, 31, 33, 34, 37, 47, 60, 68,   69, 75, 77, 78, 80, 81, 90, 91, 96, 98, 102, 103, 104, 114, 119, 125, 127]
+3rd run: [2, 5, 6, 8, 10, 27, 28, 35, 38, 39, 40, 41, 42, 43, 46, 48, 54, 56, 59, 62, 63, 67, 71, 72, 76, 85, 99, 105, 106, 113, 116, 118, 126]
+4th run: [0, 1, 13, 15, 17, 18, 21, 36, 45, 49, 50, 51, 53, 55, 57, 58, 61, 66, 73, 82, 86, 87, 88, 108, 110, 111, 120, 122, 123, 128, 129]
+
+Next is the merging process. The different runs are merged until there is only 1 run of length 130 left.
+
+1st and 2nd runs are merged. The merge algorithm is quite sophisticated. The concept of gallops is used to speed up things. If during the merge, more than 7 elements are taken as winners from the same run, we enter the galloping mode where chunks are moved to the temporary merge area instead of comparing the elements one by one. You can read more about the galloping mode in <a href="http://svn.python.org/projects/python/trunk/Objects/listsort.txt">listsort.txt</a>. We end up with a run of length 66 sorted: [3, 4, 7, 9, 11, 12, 14, 16, 19, 20, 22, 23, 24, 25, 26, 29, 30, 31, 32, 33, 34, 37, 44, 47, 52, 60, 64, 65, 68, 69, 70, 74, 75, 77, 78, 79, 80, 81, 83, 84, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 100, 101, 102, 103, 104, 107, 109, 112, 114, 115, 117, 119, 121, 124, 125, 127]
+
+1st run is now of length 66 and it is merged with the 3nd run resulting in a run of length 99: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 52, 54, 56, 59, 60, 62, 63, 64, 65, 67, 68, 69, 70, 71, 72, 74, 75, 76, 77, 78, 79, 80, 81, 83, 84, 85, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 109, 112, 113, 114, 115, 116, 117, 118, 119, 121, 124, 125, 126, 127]
+
+Last 2 runs are merged and we finally get 1 run sorted of length 130: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129]
+
+That's it for now. I hope you enjoyed the article. Please write a comment if you have any feedback.
