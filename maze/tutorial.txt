@@ -184,7 +184,7 @@ We continue with the cell in the open list having the lowest F = G + H. Only one
 
 <img src="/images/blog/maze/a_star_3.png" alt="Python algorithms for mazes">
 
-3nd round result looks like this:
+3nd round result looks like this. Cells in green are in the open list. Cells in red are in the closed list.
 
 <img src="/images/blog/maze/a_star_4.png" alt="Python algorithms for mazes">
 
@@ -212,7 +212,7 @@ Fast forward again to:
 
 <img src="/images/blog/maze/a_star_8.png" alt="Python algorithms for mazes">
 
-The next cell processed from the open list is (5, 5) and it is the ending cell so we have found our path. It is easy to display the path. We just have to follow the parent pointers up to the starting cell. Our path is highlighted in red on the following diagram:
+The next cell processed from the open list is (5, 5) and it is the ending cell so we have found our path. It is easy to display the path. We just have to follow the parent pointers up to the starting cell. Our path is highlighted in green on the following diagram:
 
 <img src="/images/blog/maze/a_star_9.png" alt="Python algorithms for mazes">
 
@@ -388,4 +388,3 @@ The main method implements the algorithm itself.
 [/code]
 
 That's it for now. I hope you enjoyed the article. Please write a comment if you have any feedback.
-
