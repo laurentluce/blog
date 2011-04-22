@@ -1,0 +1,125 @@
+We are going to talk about cryptography and how we can implement some crypto algorithms in Python.
+
+<h2>Hash functions</h2>
+
+A hash function takes a string and produces a fixed-length string based on the input. We call the output string the hash value. Ideal hash functions obey the following:
+<ul>
+<li>It should be very difficult to guess the input string based on the output string.</li>
+<li>It should be very difficult to find 2 different input strings having the same hash output.</li>
+<li>It should be very difficult to modify the input string without modifying the output hash value.</li>
+</ul>
+
+<img src="/images/blog/crypto/1.png" alt="Cryptography and Python">
+
+Hash functions can be used to calculate the checksum of some data. It can be used in digital signatures and authentication. We will see some applications in details later on.
+
+We are going to study the following hash function: MD2, MD4, MD5, SHA-1, SHA-256, SHA-512. There is MD6 and SHA-3 still in development.
+
+
+<h3>MD2</h3>
+
+This hash functions dates back from 1989. The hash value is 128-bit.
+
+We start with the input string 'abc' of length 3 bytes.
+
+[code lang="python"]
+s = [0x61, 0x62, 0x63]
+[/code]
+
+The first step appends padding bytes so the length is a multiple of 16 bytes. In our case, we need to pad the string with 13 bytes. Padding works this way: "i" bytes of value "i". So, we pad our string with 13 times value '0x0D'.
+
+[code lang="python"]
+M = s + [0x0D] * (16 - len(s))
+[/code]
+
+We get:
+[code lang="bash"]
+>>> M
+[97, 98, 99, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13]
+[/code]
+
+Next, a checksum is appended to M. To do that, we use a 256-byte random permutation based on the digits of pi. The 256-byte random permutation is defined using the following list: 
+
+[code lang="python"]
+S = [41, 46, 67, 201, 162, 216, 124, 1, 61, 54, 84, 161, 236, 240, 6,
+    19, 98, 167, 5, 243, 192, 199, 115, 140, 152, 147, 43, 217, 188,
+    76, 130, 202, 30, 155, 87, 60, 253, 212, 224, 22, 103, 66, 111, 24,
+    138, 23, 229, 18, 190, 78, 196, 214, 218, 158, 222, 73, 160, 251,
+    245, 142, 187, 47, 238, 122, 169, 104, 121, 145, 21, 178, 7, 63,
+    148, 194, 16, 137, 11, 34, 95, 33, 128, 127, 93, 154, 90, 144, 50,
+    39, 53, 62, 204, 231, 191, 247, 151, 3, 255, 25, 48, 179, 72, 165,
+    181, 209, 215, 94, 146, 42, 172, 86, 170, 198, 79, 184, 56, 210,
+    150, 164, 125, 182, 118, 252, 107, 226, 156, 116, 4, 241, 69, 157,
+    112, 89, 100, 113, 135, 32, 134, 91, 207, 101, 230, 45, 168, 2, 27,
+    96, 37, 173, 174, 176, 185, 246, 28, 70, 97, 105, 52, 64, 126, 15,
+    85, 71, 163, 35, 221, 81, 175, 58, 195, 92, 249, 206, 186, 197,
+    234, 38, 44, 83, 13, 110, 133, 40, 132, 9, 211, 223, 205, 244, 65,
+    129, 77, 82, 106, 220, 55, 200, 108, 193, 171, 250, 36, 225, 123,
+    8, 12, 189, 177, 74, 120, 136, 149, 139, 227, 99, 232, 109, 233,
+    203, 213, 254, 59, 0, 29, 57, 242, 239, 183, 14, 102, 88, 208, 228,
+    166, 119, 114, 248, 235, 117, 75, 10, 49, 68, 80, 180, 143, 237,
+    31, 26, 219, 153, 141, 51, 159, 17, 131, 20]
+[/code]
+
+The checksum is generated the following way and the result is the 16-byte list C:
+
+[code lang="python"]
+# clear checksum
+C = [0] * 16
+L = 0
+# process each 16-byte block
+for i in range(len(M)/16):
+  for j in range(16):
+    c = M[i*16 + j]
+    C[j] = S[c ^ L]
+    L = C[j]
+[/code]
+
+The checksum is appended to M and we end up with a new M:
+[code lang="bash"]
+>>> M
+[97, 98, 99, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 25, 226, 157, 27, 115, 4, 54, 142, 89, 90, 39, 111, 48, 47, 87, 204]
+[/code]
+
+The final step is the generation of the message digest. The algorithm uses the random permutation list S too. A 48-byte buffer called X is used.
+[code lang="python"]
+X = [0] * 48
+for i in range(len(M)/16):
+  for j in range(16):
+    X[16+j] = M[i*16+j]
+    X[32+j] = (X[16+j] ^ X[j])
+  
+  t = 0
+  for j in range(18):
+    for k in range(48):
+      t = X[k] = X[k] ^ S[t]
+    t = (t+j) & 0xFF
+[/code]
+
+We end up with the following X list and the message digest is the first 16 bytes of the X.
+
+[code lang="bash"]
+>>> X
+[218, 133, 59, 13, 63, 136, 217, 155, 48, 40, 58, 105, 230, 222, 214, 187, 146, 101, 35, 195, 96, 219, 104, 177, 87, 203, 101, 99, 195, 113, 243, 157, 6, 254, 254, 140, 111, 173, 229, 106, 248, 134, 93, 205, 242, 158, 219, 158]
+>>> X[0:16]
+[218, 133, 59, 13, 63, 136, 217, 155, 48, 40, 58, 105, 230, 222, 214, 187]
+[/code]
+
+It is important to know that the MD2 is vulnerable to collision attackis so it is not consider secure enough. A collision attack is when 2 different inputs result in the same hash output. 
+
+<h3>MD4</h3>
+
+
+[code lang="python"]
+
+[/code]
+
+[code lang="python"]
+
+[/code]
+
+[code lang="python"]
+
+[/code]
+
+
