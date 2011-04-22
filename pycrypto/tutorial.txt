@@ -1,0 +1,309 @@
+We are going to talk about the toolkit <a href="http://www.dlitz.net/software/pycrypto/">pycrypto</a> and how it can help us speeding up development when cryptography is involved.
+
+<a href="#a_1">Hash functions</a>
+<a href="#a_2">Encryption algorithms</a>
+<a href="#a_3">Public-key algorithms</a>
+
+<a name="a_1"></a>
+<h2>Hash functions</h2>
+
+A hash function takes a string and produces a fixed-length string based on the input. We call the output string the hash value. Ideal hash functions obey the following:
+<ul>
+<li>It should be very difficult to guess the input string based on the output string.</li>
+<li>It should be very difficult to find 2 different input strings having the same hash output.</li>
+<li>It should be very difficult to modify the input string without modifying the output hash value.</li>
+</ul>
+
+<img src="/images/blog/pycrypto/1.png" alt="Cryptography and Python">
+
+Hash functions can be used to calculate the checksum of some data. It can be used in digital signatures and authentication. We will see some applications in details later on.
+
+Let's look at one example of a hash function: MD5.
+
+<h3>MD5</h3>
+
+This hash function dates back from 1991. The hash output value is 128-bit.
+
+The algorithm's steps are as follow:
+<ul>
+<li>Pad the string to a length congruent to 448 bits, modulo 512.</li>
+<li>Append a 64-bit representation of the length of the input string.</li>
+<li>Process the message in 16-word blocks. There are 4 rounds instead of 3 compared to MD4.</li>
+</ul>
+
+You can get more details regarding the algorithm here: http://tools.ietf.org/html/rfc1321.
+
+Hashing a value using MD5 is done this way:
+
+[code lang="bash"]
+>>> from Crypto.Hash import MD5
+>>> MD5.new('abc').hexdigest()
+'900150983cd24fb0d6963f7d28e17f72'
+[/code]
+
+It is important to know that the MD5 is vulnerable to collision attacks. A collision attack is when 2 different inputs result in the same hash output. It is also vulnerable to some preimage attacks found in 2004 and 2008. A preimage attack is: given a hash h, you can find a message m where hash(m) = m.
+
+<h3>Applications</h3>
+
+Hash functions can be used in password management and storage. Web sites usually store the hash of a password and not the password itself so only the user knows the real password. When the user logs in, the hash of the password input is generated and compared to the hash value stored in the database. If it matches, the user is granted access. The code looks like this:
+
+[code lang="python"]
+from Crypto.Hash import MD5
+def check_password(clear_password, password_hash):
+  return MD5.new(clear_password).hexdigest() == password_hash
+[/code]
+
+Another application is file integrity checking. Many downloadable files include a MD5 checksum to verify the integrity of the file once downloaded. Here is the code to calculate the MD5 checksum of a file. We work on chunks to avoid using too much memory when the file is large.
+
+[code lang="python"]
+import os
+from Crypto.Hash import MD5
+def get_file_checksum(filename):
+    h = MD5.new()
+    size = os.path.getsize(filename)
+    chunk_size = 8192 
+    with open(filename, 'r') as f:
+    for i in range(size / chunk_size):
+      h.update(f.read(chunk_size))
+    f.close()
+    return h.hexdigest()
+[/code]
+
+<h3>Hash functions comparison</h3>
+
+<table border="1">
+<tr>
+<th>Hash function</th>
+<th>Hash output size (bits)</th>
+<th>Secure?</th>
+</tr>
+<tr>
+<td>MD2</td>
+<td>128</td>
+<td>No</td>
+</tr>
+<tr>
+<td>MD4</td>
+<td>128</td>
+<td>No</td>
+</tr>
+<tr>
+<td>MD5</td>
+<td>128</td>
+<td>No</td>
+</tr>
+<tr>
+<td>SHA-1</td>
+<td>160</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td>160</td>
+<td>Yes</td>
+</tr>
+</table>
+
+<a name="a_2"></a>
+<h2>Encryption algorithms</h2>
+
+Encryption algorithms take some text as input and produce ciphertext using a variable key. You have 2 types of ciphers: block and stream. Block ciphers work on blocks of a fixed size (8 or 16 bytes). Stream ciphers work byte-by-byte. Knowing the key, you can decrypt the ciphertext.
+
+<h3>Block ciphers</h3>
+
+Let's look at one of the block cipher: DES. The key size used by this cipher is 8 bytes and the block of data it works with is 8 bytes long. The simplest mode for this block cipher is the electronic code book mode where each block is encrypted independently to form the encrypted text.
+
+<img src="/images/blog/pycrypto/2.png" alt="Cryptography and Python">
+
+It is easy to encrypt text using DES/ECB with pycrypto. The key '10234567' is 8 bytes and the text's length needs to be a multiple of 8 bytes. We picked 'abcdefgh' in this example.
+
+[code lang="bash"]
+>>> from Crypto.Cipher import DES
+>>> des = DES.new('01234567', DES.MODE_ECB)
+>>> text = 'abcdefgh'
+>>> cipher_text = des.encrypt(text)
+>>> cipher_text
+'\xec\xc2\x9e\xd9] a\xd0'
+>>> des.decrypt(cipher_text)
+'abcdefgh'
+[/code]
+
+A stronger mode is CFB (Cipher feedback) which combines the plain block with the previous cipher block before encrypting it.
+
+<img src="/images/blog/pycrypto/3.png" alt="Cryptography and Python">
+
+Here is how to use DES CFB mode. The plain text is 16 bytes long (multiple of 8 bytes). We need to specify an initial feedback value: we use 'aaaaaaaa' which is 8 bytes, same size as the block size. Note how we use 2 DES objects, 1 to encrypt and 1 to decrypt. This is required because of the feedback value getting modified each time a block is encrypted.
+
+[code lang="bash"]
+>>> from Crypto.Cipher import DES
+>>> des1 = DES.new('01234567', DES.MODE_CFB, 'aaaaaaaa')
+>>> des2 = DES.new('01234567', DES.MODE_CFB, 'aaaaaaaa')
+>>> text = 'abcdefghijklmnop'
+>>> cipher_text = des1.encrypt(text)
+>>> cipher_text
+"?\\\x8e\x86\xeb\xab\x8b\x97'\xa1W\xde\x89!\xc3d"
+>>> des2.decrypt(cipher_text)
+'abcdefghijklmnop'
+[/code]
+
+<h3>Stream ciphers</h3>
+
+Those algorithms work on a byte-by-byte basis. The block size is always 1 byte. 2 algorithms are supported by pycrypto: ARC4 and XOR. Only one mode is available: ECB.
+
+Let's look at an example with the algorithm ARC4 using the key '01234567'.
+
+[code lang="bash"]
+>>> from Crypto.Cipher import ARC4
+>>> obj1 = ARC4.new('01234567')
+>>> obj2 = ARC4.new('01234567')
+>>> text = 'abcdefghijklmnop'
+>>> cipher_text = obj1.encrypt(text)
+>>> cipher_text
+'\xf0\xb7\x90{#ABXY9\xd06\x9f\xc0\x8c '
+>>> obj2.decrypt(cipher_text)
+'abcdefghijklmnop'
+[/code]
+
+<h3>Applications</h3>
+
+It is easy to write code to encrypt and decrypt a file using pycrypto ciphers. Let's do it using DES3 (Triple DES). We encrypt and decrypt data by chunks to avoid using too much memory when the file is large. In case the chunk is less than 16 bytes long, we pad it before encrypting it.
+
+[code lang="python"]
+import os
+from Crypto.Cipher import DES3
+
+def encrypt_file(in_filename, out_filename, chunk_size, key, iv):
+    des3 = DES3.new(key, DES3.MODE_CFB, iv)
+
+    with open(in_filename, 'r') as in_file:
+        with open(out_filename, 'w') as out_file:
+            while True:
+                chunk = in_file.read(chunk_size)
+                if len(chunk) == 0:
+                    break
+                elif len(chunk) % 16 != 0:
+                    chunk += ' ' * (16 - len(chunk) % 16)
+                out_file.write(des3.encrypt(chunk))
+
+def decrypt_file(in_filename, out_filename, chunk_size, key, iv):
+    des3 = DES3.new(key, DES3.MODE_CFB, iv)
+
+    with open(in_filename, 'r') as in_file:
+        with open(out_filename, 'w') as out_file:
+            while True:
+                chunk = in_file.read(chunk_size)
+                if len(chunk) == 0:
+                    break
+                out_file.write(des3.decrypt(chunk))
+[/code]
+
+Next is a usage example of the 2 functions defined above:
+
+[code lang="python"]
+key = '0123456789ABCDEF'
+iv = '00000000'
+with open('to_enc.txt', 'r') as f:
+    print 'to_enc.txt: %s' % f.read()
+encrypt_file('to_enc.txt', 'to_enc.enc', 8192, key, iv)
+with open('to_enc.enc', 'r') as f:
+    print 'to_enc.enc: %s' % f.read()
+decrypt_file('to_enc.enc', 'to_enc.dec', 8192, key, iv)
+with open('to_enc.dec', 'r') as f:
+    print 'to_enc.dec: %s' % f.read()
+[/code]
+
+The output of this script:
+
+[code lang="bash"]
+to_enc.txt: this content needs to be encrypted.
+
+to_enc.enc: ��~�EҬ�.��]!=)��"t�
+                                JpDw���R�UN0�=��R�UN0�}0r�FV9
+to_enc.dec: this content needs to be encrypted.
+[/code]
+
+<a name="a_3"></a>
+<h2>Public-key algorithms</h2>
+
+One disadvantage with the encryption algorithms seen above is that both sides need to know the key. With public-key algorithms, there are 2 different keys: 1 to encrypt and 1 to decrypt. You only need to share the encryption key and only you, can decrypt the message with your private decryption key.
+
+<img src="/images/blog/pycrypto/4.png" alt="Cryptography and Python">
+
+<h3>Public/private key pair</h3>
+
+It is easy to generate a private/public key pair with pycrypto. We need to specify the size of the key in bits: we picked 1024 bits. Larger is more secure. We also need to specify a random number generator function, we use the Random module of pycrypto for that.
+
+[code lang="bash"]
+>>> from Crypto.PublicKey import RSA
+>>> from Crypto import Random
+>>> random_generator = Random.new().read
+>>> key = RSA.generate(1024, random_generator)
+>>> key
+<_RSAobj @0x7f60cf1b57e8 n(1024),e,d,p,q,u,private>
+[/code]
+
+Let's take a look at some methods supported by this key object. can_encrypt() checks the capability of encrypting data using this algorithm. can_sign() checks the capability of signing messages. has_private() returns True if the private key is present in the object.
+
+[code lang="bash"]
+>>> key.can_encrypt()
+True
+>>> key.can_sign()
+True
+>>> key.has_private()
+True
+[/code]
+
+<h3>Encrypt</h3>
+
+Now that we have our key pair, we can encrypt some data. First, we extract the public key from the key pair and use it to encrypt some data. 32 is a random parameter used by the RSA algorithm to encrypt the data. This step simulates us publishing the encryption key and someone using it to encrypt some data before sending it to us.
+
+[code lang="bash"]
+>>> public_key = key.publickey()
+>>> enc_data = public_key.encrypt('abcdefgh', 32)
+>>> enc_data
+('\x11\x86\x8b\xfa\x82\xdf\xe3sN ~@\xdbP\x85 \x93\xe6\xb9\xe9\x95I\xa7\xadQ\x08\xe5\xc8$9\x81K\xa0\xb5\xee\x1e\xb5r\x9bH)\xd8\xeb\x03\xf3\x86\xb5\x03\xfd\x97\xe6%\x9e\xf7\x11=\xa1Y<\xdc\x94\xf0\x7f7@\x9c\x02suc\xcc\xc2j\x0c\xce\x92\x8d\xdc\x00uL\xd6.\x84~/\xed\xd7\xc5\xbe\xd2\x98\xec\xe4\xda\xd1L\rM`\x88\x13V\xe1M\n X\xce\x13 \xaf\x10|\x80\x0e\x14\xbc\x14\x1ec\xf6Rs\xbb\x93\x06\xbe',)
+[/code]
+
+<h3>Decrypt</h3>
+
+We have the private decryption key so it is easy to decrypt the data.
+
+[code lang="bash"]
+>>> key.decrypt(enc_data)
+'abcdefgh'
+[/code]
+
+<h3>Sign</h3>
+
+Signing a message can be useful to check the author of a message and make sure we can trust its origin. Next is an example on how to sign a message. The hash for this message is calculated first and then passed to the sign() method of the RSA key. You can use other algorithms like DSA or ElGamal.
+
+[code lang="bash"]
+>>> from Crypto.Hash import MD5
+>>> from Crypto.PublicKey import RSA
+>>> from Crypto import Random
+>>> key = RSA.generate(1024, random_generator)
+>>> text = 'abcdefgh'
+>>> hash = MD5.new(text).digest()
+>>> hash
+'\xe8\xdc@\x81\xb144\xb4Q\x89\xa7 \xb7{h\x18'
+>>> signature = key.sign(hash, '')
+>>> signature
+(1549358700992033008647390368952919655009213441715588267926189797
+14352832388210003027089995136141364041133696073722879839526120115
+25996986614087200336035744524518268136542404418603981729787438986
+50177007820700181992412437228386361134849096112920177007759309019
+6400328917297225219942913552938646767912958849053L,)
+[/code]
+
+<h3>Verify</h3>
+
+Knowing the public key, it is easy to verify a message. The plain text is sent to the user along with the signature. The receiving side calculates the hash value and then uses the public key verify() method to validate its origin.
+
+[code lang="bash"]
+>>> text = 'abcdefgh'
+>>> hash = MD5.new(text).digest()
+>>> public_key.verify(hash, signature)
+True
+[/code]
+
+That's it for now. I hope you enjoyed the article. Please write a comment if you have any feedback.

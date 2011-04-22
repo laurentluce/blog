@@ -1,0 +1,319 @@
+We are going to talk about the toolkit pycrypto and how it can help us speeding up development when cryptography is involved.
+
+<h2>Hash functions</h2>
+
+A hash function takes a string and produces a fixed-length string based on the input. We call the output string the hash value. Ideal hash functions obey the following:
+<ul>
+<li>It should be very difficult to guess the input string based on the output string.</li>
+<li>It should be very difficult to find 2 different input strings having the same hash output.</li>
+<li>It should be very difficult to modify the input string without modifying the output hash value.</li>
+</ul>
+
+<img src="/images/blog/crypto/1.png" alt="Cryptography and Python">
+
+Hash functions can be used to calculate the checksum of some data. It can be used in digital signatures and authentication. We will see some applications in details later on.
+
+We are going to see the following hash function: MD2, MD4, MD5, RIPEMD, SHA-1, and SHA-256. There is MD6 and SHA-3 still in development.
+
+<h3>MD2</h3>
+
+This hash function dates back from 1989. The hash value is 128-bit. This algorithm was optimized for 8-bit computer. The algorithm steps are as follow:
+<ul>
+<li>Pad the string to a multiple of 16 bytes.</li>
+<li>Add a 16-byte checksum</li>
+<li>Permute each byte in a auxiliary 48-byte block 18 times for each 16-byte block of the input string.</li>
+<li>The first 16 bytes of the auxiliary block is the hash value.</li>
+</ul>
+
+The PyCrypto library has a very handy method called digest_size() to get the size of the hash output in bytes. We can confirm that the digest's size of MD2 is 16 bytes.
+
+[code lang="bash"]
+>>> from Crypto.Hash import MD2
+>>> MD2.digest_size
+16
+[/code]
+
+Hashing a value is really easy. We create a new MD2 hashing object with the string 'abc' and generate its digest output.
+
+[code lang="bash"]
+>>> md2 = MD2.new('abc')
+>>> md2.digest()
+'\xda\x85;\r?\x88\xd9\x9b0(:i\xe6\xde\xd6\xbb'
+[/code]
+
+You can also use the update() method to update the hashing object md2 with a new string.
+
+[code lang="bash"]
+>>> h = MD2.new()
+>>> h.update('abc')
+>>> h.digest()
+'\xda\x85;\r?\x88\xd9\x9b0(:i\xe6\xde\xd6\xbb'
+[/code]
+
+The update method can be used to extend the string of the hashing object. Calling update with 'abc' then 'def' results in the same digest as calling update() with 'abcdef':
+ 
+[code lang="bash"]
+>>> h = MD2.new()
+>>> h.update('abc')
+>>> h.update('def')
+>>> h.digest()
+'\xad\x8bn(\x02\x14\xc5\xdat\\\xac\xcaU\xf9\x1d\xb3'
+>>> h = MD2.new()
+>>> h.update('abcdef')
+>>> h.digest()
+'\xad\x8bn(\x02\x14\xc5\xdat\\\xac\xcaU\xf9\x1d\xb3'
+[/code]
+
+The copy() method can be used to copy the hashing object. Altering one object string doesn't alter the original copy.
+
+[code lang="bash"]
+>>> h = MD2.new('abc')
+>>> h2 = h.copy()
+>>> h2.update('def')
+>>> h.digest()
+'\xda\x85;\r?\x88\xd9\x9b0(:i\xe6\xde\xd6\xbb'
+>>> h2.digest()
+'\xad\x8bn(\x02\x14\xc5\xdat\\\xac\xcaU\xf9\x1d\xb3'
+[/code]
+
+The hex digest output is easier to read and I use that method more often than digest().
+
+[code lang="bash"]
+>>> h = MD2.new()
+>>> h.update('abc')
+>>> h.hexdigest()
+'da853b0d3f88d99b30283a69e6ded6bb'
+[/code]
+
+This algorithm can be used to calculate the checksum of a file. Let's generate a 8192 bytes file with a random content and calculate its checksum using MD2.
+
+[code lang="python"]
+import os
+from Crypto.Hash import MD2
+
+f = open('test.txt', 'wb')
+f.write(os.urandom(8192))
+f.close()
+
+h = MD2.new()
+f = open('test.txt', 'rb')
+for i in range(8192/16):
+  h.update(f.read(16))
+f.close()
+print h.hexdigest()
+[/code]
+
+Output:
+[code lang="bash"]
+python md2.py
+8a9e7a0adc3ee91e75199d9a19a3db80
+[/code]
+
+It is interesting to time those hash algorithms and compare them. Let's create a much larger file and time the MD2 algorithm. First is the function we want to time. It reads chunks from the random file and updates the hashing object before calculating the digest message. This code is placed in a file called md2.py.
+
+[code lang="python"]
+def test(nb_chunks, chunk_size):
+  h = MD2.new()
+  f = open('test.txt', 'rb')
+  for i in range(nb_chunks):
+    h.update(f.read(chunk_size))
+  f.close()
+  print h.hexdigest()
+[/code]
+
+Next is the test script to measure that function. The timeit module is used to calculate how long it takes to run 1000 times this test function. This code is placed in a file called test.py.
+
+[code lang="python"]
+import os
+import timeit
+
+CHUNK_SIZE = 65536
+NB_CHUNKS = 16
+
+f = open('test.txt', 'wb')
+for i in range(NB_CHUNKS):
+  f.write(os.urandom(CHUNK_SIZE))
+f.close()
+
+t = timeit.Timer('md2.test(%d, %d)' % (NB_CHUNKS, CHUNK_SIZE), 'import md2')
+
+print min(t.repeat(3, 1000))
+[/code]
+
+We get 119.5 seconds to run the test function 1000 times.
+
+It is important to know that the MD2 is vulnerable to collision attacks so it is not consider secure enough. A collision attack is when 2 different inputs result in the same hash output. It is also vulnerable to some preimage attacks found in 2004 and 2008. A preimage attack is given a hash h, you can find a message m where hash(m) = m.
+
+You can read more about MD2 here: http://tools.ietf.org/html/rfc1319.
+
+<h3>MD4</h3>
+
+This hash function dates back from 1990. The hash output value is 128-bit. As a side note, MD4 is used by rsync. The algorithm is optimized for 32-bit machines.
+
+The algorithm steps are as follow:
+<ul>
+<li>Pad the string to a length congruent to 448 bits, module 512.</li>
+<li>Append a 64-bit representation of the length of the input string.</li>
+<li>Process the message in 16-word blocks. A conditional function is used during round 1. A majority function is used during round 2. A parity function is used during round 3. 4 32-bit registers are used to compute the message digest and the output is stored in those registers.</li>
+</ul>
+
+You can see more details regarding the algorithm here: http://tools.ietf.org/html/rfc1320.
+
+Hashing a value is done this way:
+
+[code lang="python"]
+>>> from Crypto.Hash import MD4
+>>> MD4.new('abc').hexdigest()
+'a448017aaf21d8525fc10ae87aa6729d'
+[/code]
+
+We can time this algorithm too using the same method as described above. We get a running time of 2.06 seconds. Big difference with the MD2 algorithm. The 32-bit optimization plays a big part here compared to a 8-bit optimized algorithm.
+
+MD4 is vulnerable to collision and preimage attacks.
+
+
+<h3>MD5</h3>
+
+This hash function dates back from 1991. The hash output value is 128-bit. As a side note, MD5 is commonly used today for checking files integrity.
+
+The algorithm is very similar to MD4. steps are as follow:
+<ul>
+<li>Pad the string to a length congruent to 448 bits, modulo 512.</li>
+<li>Append a 64-bit representation of the length of the input string.</li>
+<li>Process the message in 16-word blocks. There are 4 rounds instead of 3 compare to MD4.</li>
+</ul>
+
+You can see more details regarding the algorithm here: http://tools.ietf.org/html/rfc1321.
+
+Hashing a value using MD5 is done this way:
+
+[code lang="python"]
+>>> from Crypto.Hash import MD5
+>>> MD5.new('abc').hexdigest()
+'900150983cd24fb0d6963f7d28e17f72'
+[/code]
+
+Running time: 1.96 seconds, slightly faster than MD4.
+
+MD5 is also vulnerable to collision and preimage attacks.
+
+
+<h3>RIPEMD160</h3>
+
+RIPEMD algorithm dates back from 1990. It is based on MD4. RIPEMD is not as known as SHA-1 or MD5. The most used RIPEMD version is RIPEMD-160 (1996) with a 160-bit hash output. Is it interesting to note that RIPEMD-160 is considered as a secure remplacement for MD4 and MD5.
+
+The difference with MD4 is that the hash result is increased to 160 bits and the number of rounds is increased from 3 to 5. The boolean functions are also modified.
+
+You can see more details regarding the algorithm here: http://homes.esat.kuleuven.be/~bosselae/ripemd160.html
+
+Hashing a value using RIPEMD is done this way:
+
+[code lang="python"]
+>>> from Crypto.Hash import RIPEMD160
+>>> RIPEMD160.new('abc').hexdigest()
+'8eb208f7e05d987a9b044a8e98c6b087f15a0bfc'
+[/code]
+
+You can verify that the hash output is 20 bytes (160 bits) instead of 16 bytes:
+
+[code lang="python"]
+>>> RIPEMD160.digest_size
+20
+[/code]
+
+We can time this algorithm too using the same method as described above. We get a running time of 5.27 seconds.
+
+
+<h3>SHA-1</h3>
+
+SHA-1 dates from 1995. It is descended from MD4. The hash output is 160 bits. It is more secure than MD5 as there is no real attack known as of today.
+
+Hashing a value using SHA-1 is easy using PyCrypto.
+
+[code lang="python"]
+>>> from Crypto.Hash import SHA1
+>>> SHA1.new('abc').hexdigest()
+'a9993e364706816aba3e25717850c26c9cd0d89d'
+[/code]
+
+Running time: TODO
+
+<h3>SHA-256</h3>
+
+SHA-256 dates from 2001. It is descended from SHA-1. The hash output is 256 bits. It is more secure than SHA-1.
+
+Hashing a value using SHA-256 is done this way using PyCrypto.
+
+[code lang="python"]
+>>> from Crypto.Hash import SHA256
+>>> SHA256.new('abc').hexdigest()
+'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+[/code]
+
+Running time is: TODO
+
+<h3>Hash functions comparison</h3>
+
+<table border="1">
+<tr>
+<th>Hash function</th>
+<th>Hash output size (bits)</th>
+<th>Secure?</th>
+<th>Running time</th>
+</tr>
+<tr>
+<td>MD2</td>
+<td>128</td>
+<td>No</td>
+<td></td>
+</tr>
+<tr>
+<td>MD4</td>
+<td>128</td>
+<td>No</td>
+<td></td>
+</tr>
+<tr>
+<td>MD5</td>
+<td>128</td>
+<td>No</td>
+<td></td>
+</tr>
+<tr>
+<td>SHA-1</td>
+<td>160</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td>160</td>
+<td>Yes</td>
+<td></td>
+</tr>
+</table>
+
+
+<h2>Encryption algorithms</h2>
+
+Encryption algorithms take some text as input and produce ciphertext using a variable key. You have 2 types of ciphers: block and stream. Block ciphers work on blocks of a fixed size (8 or 16 bytes). Stream ciphers work bit-by-bit. Knowing the key, you can decrypt the ciphertext.
+
+<h3>Block ciphers</h3>
+
+Let's look at one of the block cipher: DES. The key size used by this cipher is 8 bytes and the block of data it works with is 8 bytes. The simplest mode for this block cipher is the electronic code book mode where each block is encrypted independently to form the encrypted text.
+
+<img src="/images/blog/crypto/2.png" alt="Cryptography and Python">
+
+[code lang="python"]
+
+[/code]
+
+[code lang="python"]
+
+[/code]
+
+[code lang="python"]
+
+[/code]
+
+
