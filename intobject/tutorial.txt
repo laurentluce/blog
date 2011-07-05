@@ -1,0 +1,98 @@
+This article describes how integer objects are managed by Python internally.
+
+An integer object in Python is represented internally by the structure PyIntObject. Its value is an attribute of type long.
+
+[code lang="c"]
+typedef struct {
+    PyObject_HEAD
+    long ob_ival;
+} PyIntObject;
+[/code]
+
+To avoid allocating a new integer object each time a new integer object is needed, Python allocates a block of free unused integer objects in advance.
+
+The following structure is used by Python to allocate integer objects, also called PyIntObjects. Once this structure is initialized, the integer objects are ready to be used when new integer values are assigned to objects in a Python script. This structure is called "PyIntBlock" and is defined as:
+
+[code lang="c"]
+struct _intblock {
+    struct _intblock *next;
+    PyIntObject objects[N_INTOBJECTS];
+};
+typedef struct _intblock PyIntBlock;
+[/code]
+
+When a block of integer objects is allocated by Python, the objects have no value assigned to them yet. We call them free integer objects ready to be used. A value will be assigned to the next free object when a new integer value is used in your program. No memory allocation will be required when a free integer object's value is set so it will be fast.
+
+The integer objects inside the block are linked together back to front using their internal pointer called ob_type. As noted in the source code, this is an abuse of this internal pointer so do not pay too much attention to the name.
+
+Each block of integers contains the number of integer objects which can fit in a block of 1K, about 250 integer objects. When all the integer objects inside a block are used, a new block is allocated with a new list of integer objects available.
+ 
+A singly-linked list is used to keep track of the integers blocks allocated. It is called "block_list" internally.
+
+<img src="/images/blog/intobject/1.png" alt="Python integer object internals">
+
+A specific structure is used to refer small integers and share them so access is fast. It is an array of 262 pointers to integer objects. Those integer objects are allocated during initialization in a block of integer objects we saw above. The small integers range is from -5 to 257. Many Python programs spend a lot of time using integers in that range so this is a smart decision.
+
+[code lang="c"]
+#define NSMALLPOSINTS           257
+#define NSMALLNEGINTS           5
+static PyIntObject *small_ints[NSMALLNEGINTS + NSMALLPOSINTS];
+[/code]
+
+<img src="/images/blog/intobject/2.png" alt="Python integer object internals">
+
+The integer object representing the integer -5 is at the offset 0 inside the small integers array. The integers object representing -4 is at offset 1 ...
+
+What happens when an integer is defined in a Python script like this one?
+
+[code lang="bash"]
+>>> a=1
+>>> a
+1
+[/code]
+
+When you execute the first line, the function PyInt_FromLong is called and its logic is the following:
+
+[code lang="text"]
+if integer value in range -5,257:
+    return the integer object pointed by the small integers array at the 
+    offset (value + 5).
+else:
+    if no free integer object available:
+        allocate new block of integer objects 
+    set value of the next free integer object in the current block 
+    of integers.
+    return integer object
+[/code]
+
+With our example: integer 1 object is pointed by the small integers array at offset: 1+5 = 6. A pointer to this integer object will be returned and the variable "a" will be pointing to that integer object.
+
+<img src="/images/blog/intobject/3.png" alt="Python integer object internals">
+
+Let's a look at a different example:
+
+[code lang="bash"]
+>>> a=300
+>>> a
+300
+[/code]
+
+300 is not in the range of the small integers array so the next free integer object's value is set to 300. 
+
+<img src="/images/blog/intobject/4.png" alt="Python integer object internals">
+
+If you take a look at the file intobject.c in the Python 2.6 source code, you will see a long list of functions taking care of operations like addition, multiplication, conversion... The comparison function looks like this:
+
+[code lang="c"]
+static int
+int_compare(PyIntObject *v, PyIntObject *w)
+{
+    register long i = v->ob_ival;
+    register long j = w->ob_ival;
+    return (i < j) ? -1 : (i > j) ? 1 : 0;
+}
+[/code]
+
+The value of an integer object is stored in its ob_ival attribute which is of type long. Each value is placed in a register to optimize access and the comparison is done between those 2 registers. -1 is returned if the integer object pointed by v is less than the one pointed by w. 1 is returned for the opposite and 0 is returned if they are equal.
+ 
+That's it for now. I hope you enjoyed the article. Please write a comment if you have any feedback.
