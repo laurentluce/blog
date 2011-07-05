@@ -1,4 +1,4 @@
-We are going to talk about the toolkit <a href="http://www.dlitz.net/software/pycrypto/">pycrypto</a> and how it can help us speeding up development when cryptography is involved.
+We are going to talk about the toolkit <a href="http://www.dlitz.net/software/pycrypto/">pycrypto</a> and how it can help us speed up development when cryptography is involved.
 
 <a href="#a_1">Hash functions</a>
 <a href="#a_2">Encryption algorithms</a>
@@ -7,7 +7,7 @@ We are going to talk about the toolkit <a href="http://www.dlitz.net/software/py
 <a name="a_1"></a>
 <h2>Hash functions</h2>
 
-A hash function takes a string and produces a fixed-length string based on the input. We call the output string the hash value. Ideal hash functions obey the following:
+A hash function takes a string and produces a fixed-length string based on the input. The output string is called the hash value. Ideal hash functions obey the following:
 <ul>
 <li>It should be very difficult to guess the input string based on the output string.</li>
 <li>It should be very difficult to find 2 different input strings having the same hash output.</li>
@@ -41,7 +41,7 @@ Hashing a value using MD5 is done this way:
 '900150983cd24fb0d6963f7d28e17f72'
 [/code]
 
-It is important to know that the MD5 is vulnerable to collision attacks. A collision attack is when 2 different inputs result in the same hash output. It is also vulnerable to some preimage attacks found in 2004 and 2008. A preimage attack is: given a hash h, you can find a message m where hash(m) = m.
+It is important to know that the MD5 is vulnerable to collision attacks. A collision attack is when 2 different inputs result in the same hash output. It is also vulnerable to some preimage attacks found in 2004 and 2008. A preimage attack is: given a hash h, you can find a message m where hash(m) = h.
 
 <h3>Applications</h3>
 
@@ -53,6 +53,8 @@ def check_password(clear_password, password_hash):
   return MD5.new(clear_password).hexdigest() == password_hash
 [/code]
 
+It is recommended to use a module like <a href="http://www.mindrot.org/projects/py-bcrypt/">py-bcrypt</a> to hash passwords as it is more secure than using MD5.
+
 Another application is file integrity checking. Many downloadable files include a MD5 checksum to verify the integrity of the file once downloaded. Here is the code to calculate the MD5 checksum of a file. We work on chunks to avoid using too much memory when the file is large.
 
 [code lang="python"]
@@ -60,12 +62,13 @@ import os
 from Crypto.Hash import MD5
 def get_file_checksum(filename):
     h = MD5.new()
-    size = os.path.getsize(filename)
     chunk_size = 8192 
     with open(filename, 'r') as f:
-    for i in range(size / chunk_size):
-      h.update(f.read(chunk_size))
-    f.close()
+        while True:
+            chunk = f.read(chunk_size)
+            if len(chunk) == 0:
+                break
+            h.update(chunk)
     return h.hexdigest()
 [/code]
 
@@ -95,11 +98,11 @@ def get_file_checksum(filename):
 <tr>
 <td>SHA-1</td>
 <td>160</td>
-<td>Yes</td>
+<td>No</td>
 </tr>
 <tr>
 <td>SHA-256</td>
-<td>160</td>
+<td>256</td>
 <td>Yes</td>
 </tr>
 </table>
@@ -132,12 +135,14 @@ A stronger mode is CFB (Cipher feedback) which combines the plain block with the
 
 <img src="/images/blog/pycrypto/3.png" alt="Cryptography and Python">
 
-Here is how to use DES CFB mode. The plain text is 16 bytes long (multiple of 8 bytes). We need to specify an initial feedback value: we use 'aaaaaaaa' which is 8 bytes, same size as the block size. Note how we use 2 DES objects, 1 to encrypt and 1 to decrypt. This is required because of the feedback value getting modified each time a block is encrypted.
+Here is how to use DES CFB mode. The plain text is 16 bytes long (multiple of 8 bytes). We need to specify an initial feedback value: we use a random string 8 bytes long, same size as the block size. It is better to use a random string for each new encryption to avoid chosen-ciphertext attacks. Note how we use 2 DES objects, 1 to encrypt and 1 to decrypt. This is required because of the feedback value getting modified each time a block is encrypted.
 
 [code lang="bash"]
 >>> from Crypto.Cipher import DES
->>> des1 = DES.new('01234567', DES.MODE_CFB, 'aaaaaaaa')
->>> des2 = DES.new('01234567', DES.MODE_CFB, 'aaaaaaaa')
+>>> from Crypto import Random
+>>> iv = Random.get_random_bytes(8)
+>>> des1 = DES.new('01234567', DES.MODE_CFB, iv)
+>>> des2 = DES.new('01234567', DES.MODE_CFB, iv)
 >>> text = 'abcdefghijklmnop'
 >>> cipher_text = des1.encrypt(text)
 >>> cipher_text
@@ -200,8 +205,8 @@ def decrypt_file(in_filename, out_filename, chunk_size, key, iv):
 Next is a usage example of the 2 functions defined above:
 
 [code lang="python"]
-key = '0123456789ABCDEF'
-iv = '00000000'
+from Crypto import Random
+iv = Random.get_random_bytes(8)
 with open('to_enc.txt', 'r') as f:
     print 'to_enc.txt: %s' % f.read()
 encrypt_file('to_enc.txt', 'to_enc.enc', 8192, key, iv)
