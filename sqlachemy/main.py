@@ -80,7 +80,7 @@ class Resources:
     """
     Create DB session
     """
-    s = 'mysql://root:belize09@localhost:3306/vroom'
+    s = 'mysql://root:xxxx@localhost:3306/vroom'
     self.engine = create_engine(s)
     Session = sessionmaker(bind=self.engine)
     self.session = Session()
