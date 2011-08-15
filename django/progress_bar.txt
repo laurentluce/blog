@@ -104,8 +104,9 @@ You need to make sure memcached and the python bindings are installed on your se
 We need to add a function in views.py to return the upload progress asked by the client every few seconds during the upload. This function handles the request "/get_upload_progress?X-Progress-ID=xxxx". The progress value is stored using the key "remoteaddress_uploadid".
 
 [code lang="python"]
+from django.core.cache import cache
+from django.utils import simplejson
 def get_upload_progress(request):
-  from django.utils import simplejson
   cache_key = "%s_%s" % (request.META['REMOTE_ADDR'], request.GET['X-Progress-ID'])
   data = cache.get(cache_key)
   return HttpResponse(simplejson.dumps(data))
