@@ -42,9 +42,9 @@ function string_hash:
     initialize var p pointing to 1st char of string object
     set x to value pointed by p left shifted by 7 bits
     while len >= 0:
-        set var x to (1000003 * x) power value pointed by p
+        set var x to (1000003 * x) xor value pointed by p
         increment pointer p
-    set x to x power length of string object
+    set x to x xor length of string object
     cache x as the hash so we don't need to calculate it again
     return x as the hash
 [/code]
