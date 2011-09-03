@@ -89,7 +89,7 @@ This handler saves the upload progress to the cache so it can be retrieved easil
 To enable this handler, we need to add the following to settings.py:
 [code lang="python"]
 from django.conf import global_settings
-FILE_UPLOAD_HANDLERS = (uploadprogresscachedhandler.UploadProgressCachedHandler', ) \
+FILE_UPLOAD_HANDLERS = ('uploadprogresscachedhandler.UploadProgressCachedHandler', ) \
 + global_settings.FILE_UPLOAD_HANDLERS
 [/code]
 
