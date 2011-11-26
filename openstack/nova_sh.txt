@@ -1,4 +1,4 @@
-Update 01/31/2011: Updated article based on the latest nova.sh script.
+Update 11/24/2011: Updated article based on the latest nova.sh script.
 
 This article describes the internals of the script nova.sh used to get the OpenStack Nova source code, install it and run it. Nova is a cloud computing fabric controller, the main part of an IaaS system.
 
@@ -32,20 +32,32 @@ else
 fi
 [/code]
 
-The first network interface IP address is grabbed using the ifconfig command. It is explained in the script that if you have more than 1 network interfaces then you should set the environment variable HOST_IP.
-
-[code lang="bash"]
-if [ ! -n "$HOST_IP" ]; then
-HOST_IP=`LC_ALL=C ifconfig  | grep -m 1 'inet addr:'| cut -d: -f2 | awk '{print $1}'`
-fi
-[/code]
-
 By default, sqlite will be used but you can use MySQL instead by setting the env variable USE_MYSQL and MYSQL_PASS.
 [code lang="bash"]
 USE_MYSQL=${USE_MYSQL:-0}
 MYSQL_PASS=${MYSQL_PASS:-nova}
 [/code]
 
+Next is the interface used as the public interface and the VLAN interface in the nova configuration file.
+[code lang="bash"]
+INTERFACE=${INTERFACE:-eth0}
+[/code]
+
+Floating IP addresses are used for HA. One VM can grab a floating IP address as it is taking over.
+[code lang="bash"]
+FLOATING_RANGE=${FLOATING_RANGE:-10.6.0.0/27}
+[/code]
+
+Fixed IP addresses are attached to the different interfaces.
+[code lang="bash"]
+FIXED_RANGE=${FIXED_RANGE:-10.0.0.0/24}
+[/code]
+
+You can set the path where instances data are stored:
+[code lang="bash"]
+INSTANCES_PATH=${INSTANCES_PATH:-$NOVA_DIR/instances}
+[/code]
+ 
 You can also force the script to run some unit tests (Python unit tests) when you use the command "run". For example, it will test the api, authentication, compute, network modules and much more. You can take a look at the folder nova/tests/ to see all the tests.
 [code lang="bash"]
 TEST=${TEST:-0}
@@ -79,6 +91,14 @@ NET_MAN=${NET_MAN:-VlanManager}
 In case you are using FlatDHCP on multiple hosts, you need to set the env variable FLAT_INTERFACE to a network interface with no defined IP.
 [code lang="bash"]
 FLAT_INTERFACE=ethx
+[/code]
+
+The first network interface IP address is grabbed using the ifconfig command. It is explained in the script that if you have more than 1 network interfaces then you should set the environment variable HOST_IP.
+
+[code lang="bash"]
+if [ ! -n "$HOST_IP" ]; then
+HOST_IP=`LC_ALL=C ifconfig  | grep -m 1 'inet addr:'| cut -d: -f2 | awk '{print $1}'`
+fi
 [/code]
 
 The connection to the database is defined the following way. It will be MySQL or sqlite based on your choice.
@@ -117,6 +137,31 @@ if [ "$CMD" == "branch" ]; then
 fi
 [/code]
 
+<h2>LXC setup</h2>
+
+The libvirt LXC driver manages "Linux Containers". Containers are sets of processes with private namespaces which can (but don't always) look like separate machines, but do not have their own OS. If you use "lxc" for the libvirt type, some cgroups controllers need to be mounted on the host OS.
+
+[code lang="bash"]
+has_fsmp() {
+  # has_fsmp(mountpoint,file): does file have an fstab entry for mountpoint
+  awk '$1 !~ /#/ && $2 == mp { e=1; } ; END { exit(!e); }' "mp=$1" "$2" ;
+}
+
+function lxc_setup() {
+  local mntline cmd=""
+  mntline="none /cgroups cgroup cpuacct,memory,devices,cpu,freezer,blkio 0 0"
+  has_fsmp "/cgroups" /etc/fstab ||
+     cmd="$cmd && mkdir -p /cgroups && echo '$mntline' >> /etc/fstab"
+  has_fsmp "/cgroups" /proc/mounts ||
+     cmd="$cmd && mount /cgroups"
+
+  [ -z "$cmd" ] && return 0
+  sudo sh -c ": $cmd"
+}
+
+[ "$LIBVIRT_TYPE" != "lxc" ] || lxc_setup || fail "failed to setup lxc"
+[/code]
+ 
 <h2>Install command</h2>
 
 The following Debian packages are installed if not already installed:
@@ -139,15 +184,22 @@ The following Debian packages are installed if not already installed:
 <li><b>iscsitarget</b>: iSCSI Enterprise Target userland tools.</li>
 <li><b>open-iscsi</b>: High performance, transport independent iSCSI implementation.</li>
 <li><b>socat</b>: multipurpose relay for bidirectional data transfer.</li>
+<li><b>unzip</b>: De-archiver for .zip files.</li>
+<li><b>glance</b>: The Glance project provides an image registration and discovery service (Parallax) and an image delivery service (Teller).</li>
 <li><b>radvd</b>: Router Advertisement Daemon.</li>
 <li><b>python-twisted</b>: Event-based framework for internet applications.</li>
 <li><b>python-sqlalchemy</b>: SQL toolkit and Object Relational Mapper for Python.</li>
+<li><b>python-suds</b>: Lightweight SOAP client for Python.</li>
+<li><b>python-lockfile</b>: file locking library for Python.</li>
 <li><b>python-mox</b>: a mock object framework for Python.</li>
+<li><b>python-lxml</b>: pythonic binding for the libxml2 and libxslt libraries.</li>
+<li><b>python-kombu</b>: AMQP Messaging Framework for Python.</li>
 <li><b>python-greenlet</b>: Lightweight in-process concurrent programming.</li>
 <li><b>python-carrot</b>: An AMQP messaging queue framework.</li>
 <li><b>python-migrate</b>: Database schema migration for SQLAlchemy.</li>
 <li><b>python-eventlet</b>: Eventlet is a concurrent networking library for Python.</li>
 <li><b>python-gflags</b>: Python implementation of the Google command line flags module.</li>
+<li><b>python-novaclient</b>: client library for OpenStack Compute API.</li>
 <li><b>python-ipy</b>: Python module for handling IPv4 and IPv6 addresses and networks.</li>
 <li><b>python-cheetah</b>: text-based template engine and Python code generator.</li>
 <li><b>python-libvirt</b>: libvirt Python bindings.</li>
@@ -156,7 +208,6 @@ The following Debian packages are installed if not already installed:
 <li><b>python-paste</b>: Tools for using a Web Server Gateway Interface stack.</li>
 <li><b>python-netaddr</b>: manipulation of various common network address notations.</li>
 <li><b>python-tempita</b>: very small text templating language.</li>
-<li><b>python-migrate</b>: Database schema migration for SQLAlchemy.</li>
 <li><b>python-pastedeploy</b>: Load, configure, and compose WSGI applications and servers.</li>
 <li><b>python-glance</b>: OpenStack Image Registry and Delivery Service.</li>
 </ul>
@@ -176,18 +227,23 @@ if [ "$CMD" == "install" ]; then
     sudo apt-get update
     sudo apt-get install -y dnsmasq-base kpartx kvm gawk iptables ebtables
     sudo apt-get install -y user-mode-linux kvm libvirt-bin
+    # Bypass  RabbitMQ "OK" dialog
+    echo "rabbitmq-server rabbitmq-server/upgrade_previous note" | sudo debconf-set-selections
     sudo apt-get install -y screen euca2ools vlan curl rabbitmq-server
     sudo apt-get install -y lvm2 iscsitarget open-iscsi
-    sudo apt-get install -y socat
+    sudo apt-get install -y socat unzip glance
     echo "ISCSITARGET_ENABLE=true" | sudo tee /etc/default/iscsitarget
     sudo /etc/init.d/iscsitarget restart
     sudo modprobe kvm
     sudo /etc/init.d/libvirt-bin restart
     sudo modprobe ndb
-    sudo apt-get install -y python-twisted python-sqlalchemy python-mox python- greenlet python-carrot
-    sudo apt-get install -y python-migrate python-eventlet python-gflags python-ipy python-tempita
-    sudo apt-get install -y python-libvirt python-libxml2 python-routes python-cheetah
-    sudo apt-get install -y python-netaddr python-paste python-pastedeploy python-glance
+    sudo apt-get install -y python-mox python-lxml python-kombu python-paste
+    sudo apt-get install -y python-migrate python-gflags python-greenlet
+    sudo apt-get install -y python-libvirt python-libxml2 python-routes
+    sudo apt-get install -y python-netaddr python-pastedeploy python-eventlet
+    sudo apt-get install -y python-novaclient python-glance python-cheetah
+    sudo apt-get install -y python-carrot python-tempita python-sqlalchemy
+    sudo apt-get install -y python-suds python-lockfile python-netaddr
     
     if [ "$USE_IPV6" == 1 ]; then
         sudo apt-get install -y radvd
@@ -203,27 +259,50 @@ mysql-server-5.1 mysql-server/start_on_boot boolean true
 MYSQL_PRESEED
         apt-get install -y mysql-server python-mysqldb
     fi
-    mkdir -p $DIR/images
-    wget -c http://images.ansolabs.com/tty.tgz
-    tar -C $DIR/images -zxf tty.tgz
     exit
 fi
 [/code]
 
 <h2>Run command</h2>
 
-A lot is happening in this section. First, based on the enviroment variables set above, the script writes the nova flags to nova.conf and creates the nova folder in /etc/.
+A lot is happening in this section. First is 
+
+A new screen is started in detached mode with the session name specified in the environment variable SCREEN_NAME. The following code also checks if a screen with the same session name already exists and asks the user to kill it if it is the case. Screen is a full-screen window manager that multiplexes a physical terminal between several processes.
+[code lang="bash"]
+# check for existing screen, exit if present
+  found=$(screen -ls | awk '-F\t' '$2 ~ m {print $2}' "m=[0-9]+[.]$SCREEN_NAME")
+  if [ -n "$found" ]; then
+    {
+    echo "screen named '$SCREEN_NAME' already exists!"
+    echo " kill it with: screen -r '$SCREEN_NAME' -x -X quit"
+    echo " attach to it with: screen -d -r '$SCREEN_NAME'"
+    exit 1;
+    } 2>&1
+  fi
+  screen -d -m -S $SCREEN_NAME -t nova
+  sleep 1
+  if [ "$SCREEN_STATUS" != "0" ]; then
+    screen -r "$SCREEN_NAME" -X hardstatus alwayslastline "%-Lw%{= BW}%50>%n%f* %t%{-}%+Lw%< %= %H"
+  fi
+[/code]
+
+Based on the environment variables set above, the script writes the nova flags to nova.conf and creates the nova folder in /etc/.
 [code lang="bash"]
 cat >$NOVA_DIR/bin/nova.conf << NOVA_CONF_EOF
 --verbose
 --nodaemon
 --dhcpbridge_flagfile=$NOVA_DIR/bin/nova.conf
 --network_manager=nova.network.manager.$NET_MAN
---cc_host=$HOST_IP
---routing_source_ip=$HOST_IP
+--my_ip=$HOST_IP
+--public_interface=$INTERFACE
+--vlan_interface=$INTERFACE
 --sql_connection=$SQL_CONN
 --auth_driver=nova.auth.$AUTH
 --libvirt_type=$LIBVIRT_TYPE
+--fixed_range=$FIXED_RANGE
+--lock_path=$LOCK_PATH
+--instances_path=$INSTANCES_PATH
+--flat_network_bridge=br100
 NOVA_CONF_EOF
 
 if [ -n "$FLAT_INTERFACE" ]; then
@@ -245,11 +324,6 @@ In case IPv6 support is enabled, radvd is killed:
 if [ "$USE_IPV6" == 1 ]; then
    killall radvd
 fi
-[/code]
-
-A new screen is started in detached mode with the session name "nova". Screen is a full-screen window manager that multiplexes a physical terminal between several processes.
-[code lang="bash"]
-screen -d -m -S nova -t nova
 [/code]
 
 The script recreates the database "nova".
@@ -283,18 +357,6 @@ rm -rf $NOVA_DIR/networks
 mkdir -p $NOVA_DIR/networks
 [/code]
 
-All VLANs are removed. Nova creates a VLAN for the project (VLAN id 100) and a bridge with this VLAN and the VM NIC. A DHCP server runs on this bridge to serve IP to the VM. The script clean-vlans brings down the bridge interface, deletes the bridge, brings down the VLAN interface and deletes the VLAN.
-[code lang="bash"]
-$NOVA_DIR/tools/clean-vlans
-[/code]
-
-A symbolic link is created pointing to the nova directory images directory:
-[code lang="bash"]
-if [ ! -d "$NOVA_DIR/images" ]; then
-    ln -s $DIR/images $NOVA_DIR/images
-fi
-[/code]
-
 If test mode is enabled (see above), the unit tests are run:
 [code lang="bash"]
 if [ "$TEST" == 1 ]; then
@@ -303,7 +365,7 @@ if [ "$TEST" == 1 ]; then
     cd $DIR
 fi
 [/code]
-    
+ 
 A new database is created
 [code lang="bash"]
 $NOVA_DIR/bin/nova-manage db sync
@@ -311,7 +373,7 @@ $NOVA_DIR/bin/nova-manage db sync
 
 A new admin user is added:
 [code lang="bash"]
-$NOVA_DIR/bin/nova-manage user admin admin
+$NOVA_DIR/bin/nova-manage user admin admin admin admin
 [/code]
 
 A new project "admin" managed by "admin" is created:
@@ -319,12 +381,51 @@ A new project "admin" managed by "admin" is created:
 $NOVA_DIR/bin/nova-manage project create admin admin
 [/code]
 
-The project environment variables are exported to a file named: novarc
+A small network is created with 32 IPs from the fixed range:
 [code lang="bash"]
-$NOVA_DIR/bin/nova-manage project environment admin admin $NOVA_DIR/novarc
+$NOVA_DIR/bin/nova-manage network create private $FIXED_RANGE 1 32
+[/code]
+
+Create some floating IPs using the floating range.
+[code lang="bash"]
+$NOVA_DIR/bin/nova-manage floating create $FLOATING_RANGE
+[/code]
+
+Download an image from ansolabs and untar it in the images dir.
+[code lang="bash"]
+if [ ! -d $DIR/images ]; then
+   mkdir -p $DIR/images
+   wget -c http://images.ansolabs.com/tty.tgz
+   tar -C $DIR/images -zxf tty.tgz
+fi
+[/code]
+
+If ami-tty image in images service then convert the image in directory from the old (Bexar) format to the new format.
+[code lang="bash"]
+if ! glance details | grep ami-tty; then
+    $NOVA_DIR/bin/nova-manage image convert $DIR/images
+fi
 [/code]
 
 The file novarc looks like this for me. I am running things on Amazon EC2 right now. 10.240.95.3 is my EC2 instance private IP. The EC2 API server is listening on port 8773 and the OpenStack API is listening on port 8774. The data store will be running on port 3333.
+
+The different servers, controllers and stores are started and we can browse them through the screen session created above. See <a href="http://nova.openstack.org/nova.concepts.html">Nova Concepts and Introduction</a> for more details on the Nova architecture.
+[code lang="bash"]
+screen_it api "$NOVA_DIR/bin/nova-api"
+screen_it objectstore "$NOVA_DIR/bin/nova-objectstore"
+screen_it compute "$NOVA_DIR/bin/nova-compute"
+screen_it network "$NOVA_DIR/bin/nova-network"
+screen_it scheduler "$NOVA_DIR/bin/nova-scheduler"
+screen_it volume "$NOVA_DIR/bin/nova-volume"
+screen_it ajax_console_proxy "$NOVA_DIR/bin/nova-ajax-console-proxy"
+sleep 2
+$NOVA_DIR/bin/nova-manage project zipfile admin admin $NOVA_DIR/nova.zip
+unzip -o $NOVA_DIR/nova.zip -d $NOVA_DIR/
+screen_it test "export PATH=$NOVA_DIR/bin:$PATH;. $NOVA_DIR/novarc"
+if [ "$CMD" != "run_detached" ]; then
+  screen -S nova -x
+fi
+[/code]
 
 [code lang="bash"]
 NOVA_KEY_DIR=$(pushd $(dirname $BASH_SOURCE)>/dev/null; pwd; popd>/dev/null)
@@ -344,28 +445,10 @@ export CLOUD_SERVERS_USERNAME="admin"
 export CLOUD_SERVERS_URL="http://10.240.95.3:8774/v1.0/"
 [/code]
 
-A small network is created with 32 IPs in a fixed range:
-[code lang="bash"]
-$NOVA_DIR/bin/nova-manage network create 10.0.0.0/8 1 32
-[/code]
-
-The different servers, controllers and stores are started and we can browse them through the screen session created above. See <a href="http://nova.openstack.org/nova.concepts.html">Nova Concepts and Introduction</a> for more details on the Nova architecture.
-[code lang="bash"]
-screen_it api "$NOVA_DIR/bin/nova-api"
-screen_it objectstore "$NOVA_DIR/bin/nova-objectstore"
-screen_it compute "$NOVA_DIR/bin/nova-compute"
-screen_it network "$NOVA_DIR/bin/nova-network"
-screen_it scheduler "$NOVA_DIR/bin/nova-scheduler"
-screen_it volume "$NOVA_DIR/bin/nova-volume"
-screen_it ajax_console_proxy "$NOVA_DIR/bin/nova-ajax-console-proxy"
-screen_it test ". $NOVA_DIR/novarc"
-screen -S nova -x
-[/code]
-
 Once the nova session is finished, the instances are terminated and the volumes deleted. This code is also run when the command "terminate" is used.
 [code lang="bash"]
 if [ "$CMD" == "run" ] || [ "$CMD" == "terminate" ]; then
-   # shutdown instances
+    # shutdown instances
     . $NOVA_DIR/novarc; euca-describe-instances | grep i- | cut -f2 | xargs     euca-terminate-instances
     sleep 2
     # delete volumes
