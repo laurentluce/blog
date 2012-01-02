@@ -1,0 +1,327 @@
+This post describes the implementation of sentiment analysis of tweets using Python and the natural language toolkit<a href="http://www.nltk.org">NLTK</a>. The post also describes the internals of NLTK related to this implementation.
+
+<h2>Background</h2>
+
+The purpose of the implementation is to be able to automatically classify a tweet as a positive or negative tweet sentiment wise.
+
+The classifier needs to be trained and to do that, we need a list of manually classified tweets. Let's start with 5 positive tweets and 5 negative tweets.
+
+Positive tweets:
+<ul>
+  <li>I love this car.</li>
+  <li>This view is amazing.</li>
+  <li>I feel great this morning.</li>
+  <li>I am so excited about tonight\'s concert.</li>
+  <li>He is my best friend.</li>
+</ul>
+
+Negative tweets:
+<ul>
+  <li>I do not like this car.</li>
+  <li>This view is horrible.</li>
+  <li>I feel tired this morning.</li>
+  <li>I am not looking forward to tonight\'s concert.</li>
+  <li>He is my enemy.</li>
+</ul>
+
+In the full implementation, I use about 600 positive tweets and 600 negative tweets to train the classifier. Even with those numbers, it is quite a small sample and you should use a much larger set if you want good results.
+
+Next is a test set so we can assess the exactitude of the trained classifier.
+
+Test tweets:
+<ul>
+  <li>I feel happy this morning. positive.</li>
+  <li>Larry is my friend. positive.</li>
+  <li>I do not like that man. negative.</li>
+  <li>My house is not great. negative.</li>
+  <li>Your song is annoying. negative.</li>
+</ul>
+
+<h2>Implementation</h2>
+
+The following list contains the positive tweets:
+
+[code lang="python"]
+pos_tweets = [('I love this car', 'positive'),
+              ('This view is amazing', 'positive'),
+              ('I feel great this morning', 'positive'),
+              ('I am so excited about tonight's concert', 'positive'),
+              ('He is my best friend', 'positive')]
+[/code]
+
+The following list contains the negative tweets:
+
+[code lang="python"]
+neg_tweets = [('I do not like this car', 'negative'),
+              ('This view is horrible', 'negative'),
+              ('I feel tired this morning', 'negative'),
+              ('I am not looking forward to tonight\'s concert', 'negative'),
+              ('He is my enemy', 'negative')]
+[/code]
+
+We take both of those lists and create a single list of tuples each containing two elements. First element is an array containing the words and second element is the type of sentiment. We get rid of the words smaler than 2 characters and we use lowercase for everything. 
+
+[code lang="python"]
+tweets = []
+for (words, sentiment) in pos_tweets + neg_tweets:
+  words_filtered = [e.lower() for e in words.split() if len(e) >= 3] 
+  tweets.append((words_filtered, sentiment))
+[/code]
+
+The list of tweets now looks like this:
+[code lang="python"]
+tweets = [
+    (['love', 'this', 'car'], 'positive'),
+    (['this', 'view', 'amazing'], 'positive'),
+    (['feel', 'great', 'this', 'morning'], 'positive'),
+    (['excited', 'about', "tonight's", 'concert'], 'positive'),
+    (['best', 'friend'], 'positive'),
+    (['not', 'like', 'this', 'car'], 'negative'),
+    (['this', 'view', 'horrible'], 'negative'),
+    (['feel', 'tired', 'this', 'morning'], 'negative'),
+    (['not', 'looking', 'forward', "tonight's", 'concert'], 'negative'),
+    (['enemy'], 'negative')]
+[/code]
+
+Finally, the list with the test tweets:
+
+[code lang="python"]
+test_tweets = [
+    (['feel', 'happy', 'this', 'morning'], 'positive'),
+    (['larry', 'friend'], 'positive'),
+    (['not', 'like', 'that', 'man'], 'negative'),
+    (['house', 'not', 'great'], 'negative'),
+    (['your', 'song', 'annoying'], 'negative')]
+[/code]
+
+
+<h2>Classifier</h2>
+
+The list of word features need to be extracted from the tweets. It is a list with every distinct words ordered by frequency of appearance. We use the following function to get the list plus the two helper functions.
+ 
+[code lang="python"]
+word_features = get_word_features(
+                    get_words_in_tweets(tweets),
+                    num_word_features)
+[/code]
+
+[code lang="python"]
+def get_words_in_tweets(tweets):
+    all_words = []
+    for (words, sentiment) in tweets:
+      all_words.extend(words)
+    return all_words
+[/code]
+
+[code lang="python"]
+def get_word_features(wordlist):
+    wordlist = nltk.FreqDist(wordlist)
+    word_features = wordlist.keys()
+    return word_features
+[/code]
+
+If we take a pick inside get_word_features, the variable 'wordlist' contains:
+
+<FreqDist: 'this': 6, 'car': 2, 'concert': 2, 'feel': 2, 'morning': 2, 'not': 2, "tonight's": 2, 'view': 2, 'about': 1, 'amazing': 1, 'best': 1, 'enemy': 1, 'excited': 1, 'forward': 1, 'friend': 1, 'great': 1, 'horrible': 1, 'like': 1, 'looking': 1, 'love': 1, 'tired': 1>
+
+We end up with the following list of word features:
+
+[code lang="python"]
+word_features = ['this', 'car', 'concert', 'feel', 'morning', 'not', "tonight's", 'view', 'about', 'amazing', 'best', 'enemy', 'excited', 'forward', 'friend', 'great', 'horrible', 'like', 'looking', 'love', 'tired']
+[/code]
+
+As you can see, 'this' is the most used word in our tweets, followed by 'car', followed by 'concert'...
+
+To create a classifier, we need to decide what features are relevant. To do that, we first need a feature extractor. The one we are going to use returns a dictionary indicating what words are contained in the input passed. Here the input is the tweet. We use the word features list defined above along with the input to create the dictionary.
+
+[code lang="python"]
+def extract_features(document):
+    document_words = set(document)
+    features = {}
+    for word in word_features:
+      features['contains(%s)' % word] = (word in document_words)
+    return features
+[/code]
+
+As an example, let's call the feature extractor with the document ['love', 'this', 'car'] which is the first positive tweet. We obtain the following dictionary which indicates that the document contains the words: 'love', 'this' and 'car'.
+
+[code lang="python"]
+{'contains(not)': False,
+ 'contains(view)': False,
+ 'contains(best)': False,
+ 'contains(excited)': False,
+ 'contains(morning)': False,
+ 'contains(about)': False,
+ 'contains(horrible)': False,
+ 'contains(like)': False,
+ 'contains(this)': True,
+ 'contains(friend)': False,
+ 'contains(concert)': False,
+ 'contains(feel)': False,
+ 'contains(love)': True,
+ 'contains(looking)': False,
+ 'contains(tired)': False,
+ 'contains(forward)': False,
+ 'contains(car)': True,
+ "contains(tonight's)": False,
+ 'contains(amazing)': False,
+ 'contains(enemy)': False,
+ 'contains(great)': False}
+[/code]
+
+With our feature extractor, we can apply the features to our classifier. We pass the feature extractor along with the tweets list defined above.
+
+[code lang="python"]
+training_set = nltk.classify.apply_features(extract_features, tweets)
+[/code]
+
+The variable training_set contains the feature sets. It is a list of tuples which each tuple containing the feature dictionary and the sentiment string for each tweet. The sentiment string is also called 'label'.
+
+[code lang="python"]
+[({'contains(not)': False,
+   ...
+   'contains(this)': True,
+   ...
+   'contains(love)': True,
+   ...
+   'contains(car)': True,
+   ...
+   'contains(great)': False},
+  'positive'),
+ ({'contains(not)': False,
+   'contains(view)': True,
+   ...
+   'contains(this)': True,
+   ...
+   'contains(amazing)': True,
+   ...
+   'contains(enemy)': False,
+   'contains(great)': False},
+  'positive'),
+  ...]
+[/code]
+
+Now that we have our training set, we can train our classifier.
+
+[code lang="python"]
+classifier = nltk.NaiveBayesClassifier.train(training_set)
+[/code]
+
+The Naive Bayes classifier uses the prior probability of each label which is the frequency of each label in the training set, and the contribution from each feature. In our case, the frequency of each label is the same between 'positive' and 'negative'. The word 'amazing' appears in 1 of 5 of the positive tweets and 0 of 5 of the negative tweets. This means that the likelihood of the 'positive' label will be multiplied by 0.2 when this word is seen as part of the input. 
+
+Let's take a look inside the classifier train method. label_probdist is the prior probability of each label and feature_probdist is the feature/value probability dictionary. Those 2 probabilities objects are used to create the classifier.
+
+[code lang="python"]
+def train(labeled_featuresets, estimator=ELEProbDist):
+    ...
+    # Create the P(label) distribution
+    label_probdist = estimator(label_freqdist)
+    ...
+    # Create the P(fval|label, fname) distribution
+    feature_probdist = {}
+    ...
+    return NaiveBayesClassifier(label_probdist, feature_probdist)
+[/code]
+
+In our case, the probability of each label is 0.5 as we can see below. label_probdist is of type <a href="http://nltk.googlecode.com/svn/trunk/doc/api/nltk.probability.ELEProbDist-class.html">ELEProbDist</a>.
+
+[code lang="python"]
+print label_probdist.prob('positive')
+0.5
+print label_probdist.prob('negative')
+0.5
+[/code]
+
+The feature/value probability dictionary associates expected likelihood estimate to a feature and label. We can see that the probability for the input to be negative is about 0.077 when the input contains the word 'best'.
+
+[code lang="python"]
+print feature_probdist
+{('negative', 'contains(view)'): <ELEProbDist based on 5 samples>, ('positive', 'contains(excited)'): <ELEProbDist based on 5 samples>, ('negative', 'contains(best)'): <ELEProbDist based on 5 samples>, ...}
+print feature_probdist[('negative', 'contains(best)')].prob(True)
+0.076923076923076927
+[/code]
+
+We can display the most informative features for our classifier. It indicates that if the input does not contain the word 'not' then the positive ration is 1.6. 
+
+[code lang="python"]
+print classifier.show_most_informative_features(32)
+Most Informative Features
+           contains(not) = False          positi : negati =      1.6 : 1.0
+         contains(tired) = False          positi : negati =      1.2 : 1.0
+       contains(excited) = False          negati : positi =      1.2 : 1.0
+         contains(great) = False          negati : positi =      1.2 : 1.0
+       contains(looking) = False          positi : negati =      1.2 : 1.0
+          contains(like) = False          positi : negati =      1.2 : 1.0
+          contains(love) = False          negati : positi =      1.2 : 1.0
+       contains(amazing) = False          negati : positi =      1.2 : 1.0
+         contains(enemy) = False          positi : negati =      1.2 : 1.0
+         contains(about) = False          negati : positi =      1.2 : 1.0
+          contains(best) = False          negati : positi =      1.2 : 1.0
+       contains(forward) = False          positi : negati =      1.2 : 1.0
+        contains(friend) = False          negati : positi =      1.2 : 1.0
+      contains(horrible) = False          positi : negati =      1.2 : 1.0
+...
+[/code]
+
+<h2>Classify</h2>
+
+Now that we have our classifier initialized, we can try to classify a tweet and see what the sentiment type output is. Our classifier is able to detect that this tweet has a positive sentiment because of the word 'friend' which is associated to the positive tweet 'He is my best friend'. 
+
+[code lang="python"]
+tweet = 'Larry is my friend'
+print classifier.classify(extract_features(tweet.split()))
+positive
+[/code]
+
+Let's take a look at how the classify method works internally. What we pass to the classify method is the feature set for the tweet we want to analyze. The feature set dictionary indicates that the tweet contains the word 'friend'.
+
+[code lang="python"]
+print extract_features(tweet.split())
+{'contains(not)': False, 'contains(view)': False, 'contains(best)': False, 'contains(excited)': False, 'contains(morning)': False, 'contains(about)': False, 'contains(horrible)': False, 'contains(like)': False, 'contains(this)': False, 'contains(friend)': True, 'contains(concert)': False, 'contains(feel)': False, 'contains(love)': False, 'contains(looking)': False, 'contains(tired)': False, 'contains(forward)': False, 'contains(car)': False, "contains(tonight's)": False, 'contains(amazing)': False, 'contains(enemy)': False, 'contains(great)': False}
+[/code]
+
+The internal method called is classify of the class NaiveBayesclassifier. Its logic is the following:
+
+[code lang="python"]
+def classify(self, featureset):
+    # Discard any feature names that we've never seen before.
+    # Find the log probabilty of each label, given the features.
+    # Then add in the log probability of features given labels.
+    # Generate a probability distribution dictionary using the dict logprod
+    # Return the sample with the greatest probability from the probability
+    # distribution dictionary
+[/code]
+
+Let's go through that method using our example. The parameter passed to the method classify is the feature set dictionary we saw above. The first step is to discard any feature names that are not know by the classifier. This step does nothing in our case so the feature set stays the same.
+
+Next step is to find the log probability of each label. The probability of each label ('positive' and 'negative') is 0.5. The log probability is the log base 2 of that which is -1. We end up with logprod containing the following:
+
+[code lang="python"]
+{'positive': -1.0, 'negative': -1.0}
+[/code]
+
+The log probability of features given labels is then added to logprod. This means that for each label, we go through the items in the feature set and we add the log probability of each item to logprod[label]. For example, we have the feature name 'friend' and the feature value True. Its log probability for the label 'positive' in our classifier is -2.12. This value is added to logprod['positive']. We end up with the following logprod dictionary.
+
+[code lang="python"]
+{'positive': -5.4785441837188511, 'negative': -14.784261334886439}
+[/code]
+
+The probability distribution dictionary of type <a href="http://nltk.googlecode.com/svn/trunk/doc/api/nltk.probability.DictionaryProbDist-class.html">DictionaryProbDist</a> is generated:
+
+[code lang="python"]
+DictionaryProbDist(logprob, normalize=True, log=True)
+[/code]
+
+The label with the greatest probability is returned and it is 'positive'. Our classifier found out that this tweets has a positive sentiment based on the training we did.
+
+Taking the following test tweet, the classifier thinks it is positive. The reason is that we don't have any information on feature names like 'annoying'. Larger the training sample tweets is, better the classifier will be.
+
+[code lang="python"]
+tweet = 'Your song is annoying'
+print classifier.classify(extract_features(tweet.split()))
+positive
+[/code]
+
+There is an <a href="http://nltk.googlecode.com/svn/trunk/doc/api/nltk.classify.util-pysrc.html#accuracy">accuracy</a> method we can use to check the quality of our classifier by using our test tweets. We get 0.8 in our case which is high because we picked our test tweets for this article. The key is to have a very large number of manually classified positive and negative tweets.
+
+Voilà. Don't hesitate to post a comment if you have any feedback.
