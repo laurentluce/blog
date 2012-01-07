@@ -76,17 +76,17 @@ print extract_features(tweet.split())
 sentiment = classifier.classify(extract_features(tweet.split()))
 print sentiment
 
-tweet = 'I do not like this man'
+tweet = 'I do not like that man'
 print extract_features(tweet.split())
 sentiment = classifier.classify(extract_features(tweet.split()))
 print sentiment
 
-tweet = 'This house is not great'
+tweet = 'My house is not great'
 print extract_features(tweet.split())
 sentiment = classifier.classify(extract_features(tweet.split()))
 print sentiment
 
-tweet = 'This song is annoying'
+tweet = 'Your song is annoying'
 print extract_features(tweet.split())
 sentiment = classifier.classify(extract_features(tweet.split()))
 print sentiment

@@ -24,7 +24,7 @@ Negative tweets:
   <li>He is my enemy.</li>
 </ul>
 
-In the full implementation, I use about 600 positive tweets and 600 negative tweets to train the classifier. Even with those numbers, it is quite a small sample and you should use a much larger set if you want good results.
+In the full implementation, I use about 600 positive tweets and 600 negative tweets to train the classifier. I store those tweets in a Redis DB. Even with those numbers, it is quite a small sample and you should use a much larger set if you want good results.
 
 Next is a test set so we can assess the exactitude of the trained classifier.
 
@@ -100,9 +100,7 @@ test_tweets = [
 The list of word features need to be extracted from the tweets. It is a list with every distinct words ordered by frequency of appearance. We use the following function to get the list plus the two helper functions.
  
 [code lang="python"]
-word_features = get_word_features(
-                    get_words_in_tweets(tweets),
-                    num_word_features)
+word_features = get_word_features(get_words_in_tweets(tweets))
 [/code]
 
 [code lang="python"]
@@ -122,12 +120,38 @@ def get_word_features(wordlist):
 
 If we take a pick inside the function get_word_features, the variable 'wordlist' contains:
 
-<FreqDist: 'this': 6, 'car': 2, 'concert': 2, 'feel': 2, 'morning': 2, 'not': 2, 'the': 2, 'view': 2, 'about': 1, 'amazing': 1, 'best': 1, 'enemy': 1, 'excited': 1, 'forward': 1, 'friend': 1, 'great': 1, 'horrible': 1, 'like': 1, 'looking': 1, 'love': 1, 'tired': 1>
+[code lang="python"]
+<FreqDist:
+    'this': 6,
+    'car': 2,
+    'concert': 2,
+    'feel': 2,
+    'morning': 2,
+    'not': 2,
+    'the': 2,
+    'view': 2,
+    'about': 1,
+    'amazing': 1,
+    ...
+>
+[/code]
 
 We end up with the following list of word features:
 
 [code lang="python"]
-word_features = ['this', 'car', 'concert', 'feel', 'morning', 'not', 'the', 'view', 'about', 'amazing', 'best', 'enemy', 'excited', 'forward', 'friend', 'great', 'horrible', 'like', 'looking', 'love', 'tired']
+word_features = [
+    'this',
+    'car',
+    'concert',
+    'feel',
+    'morning',
+    'not',
+    'the',
+    'view',
+    'about',
+    'amazing',
+    ...
+]
 [/code]
 
 As you can see, 'this' is the most used word in our tweets, followed by 'car', followed by 'concert'...
@@ -163,7 +187,7 @@ As an example, let's call the feature extractor with the document ['love', 'this
  'contains(tired)': False,
  'contains(forward)': False,
  'contains(car)': True,
- "contains(the)": False,
+ 'contains(the)': False,
  'contains(amazing)': False,
  'contains(enemy)': False,
  'contains(great)': False}
@@ -300,7 +324,7 @@ print extract_features(tweet.split())
  'contains(tired)': False,
  'contains(forward)': False,
  'contains(car)': False,
- "contains(the)": False,
+ 'contains(the)': False,
  'contains(amazing)': False,
  'contains(enemy)': False,
  'contains(great)': False}
@@ -338,7 +362,9 @@ DictionaryProbDist(logprob, normalize=True, log=True)
 
 The label with the greatest probability is returned which is 'positive'. Our classifier finds out that this tweets has a positive sentiment based on the training we did.
 
-Taking the following test tweet, the classifier thinks it is positive. The reason is that we don't have any information on the feature name 'annoying'. Larger the training sample tweets is, better the classifier will be.
+Another example is the tweet 'My house is not great'. The word 'great' weights more on the positive side but the word 'not' is part of two negative tweets in our training set so the output from the classifier is 'negative'. Of course, the following tweet: 'The movie is not bad' would return 'negative' even if it is 'positive'. Again, a large and well chosen sample will help with the accuracy of the classifier.
+ 
+Taking the following test tweet 'Your song is annoying'. The classifier thinks it is positive. The reason is that we don't have any information on the feature name 'annoying'. Larger the training sample tweets is, better the classifier will be.
 
 [code lang="python"]
 tweet = 'Your song is annoying'
