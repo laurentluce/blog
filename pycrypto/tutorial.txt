@@ -50,7 +50,7 @@ Hash functions can be used in password management and storage. Web sites usually
 [code lang="python"]
 from Crypto.Hash import MD5
 def check_password(clear_password, password_hash):
-  return MD5.new(clear_password).hexdigest() == password_hash
+    return MD5.new(clear_password).hexdigest() == password_hash
 [/code]
 
 It is recommended to use a module like <a href="http://www.mindrot.org/projects/py-bcrypt/">py-bcrypt</a> to hash passwords as it is more secure than using MD5.
@@ -63,7 +63,7 @@ from Crypto.Hash import MD5
 def get_file_checksum(filename):
     h = MD5.new()
     chunk_size = 8192 
-    with open(filename, 'r') as f:
+    with open(filename, 'rb') as f:
         while True:
             chunk = f.read(chunk_size)
             if len(chunk) == 0:
