@@ -64,8 +64,8 @@ We take both of those lists and create a single list of tuples each containing t
 [code lang="python"]
 tweets = []
 for (words, sentiment) in pos_tweets + neg_tweets:
-  words_filtered = [e.lower() for e in words.split() if len(e) >= 3] 
-  tweets.append((words_filtered, sentiment))
+    words_filtered = [e.lower() for e in words.split() if len(e) >= 3] 
+    tweets.append((words_filtered, sentiment))
 [/code]
 
 The list of tweets now looks like this:
