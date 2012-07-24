@@ -41,12 +41,12 @@ Let's look at what happens when we initialize an empty list. e.g. l = [].
 arguments: size of the list = 0
 returns: list object = []
 PyListNew:
-  nbytes = size * size of global Python object = 0
-  allocate new list object
-  allocate list of pointers (ob_item) of size nbytes = 0
-  clear ob_item
-  set list's allocated var to 0 = 0 slots
-  return list object 
+    nbytes = size * size of global Python object = 0
+    allocate new list object
+    allocate list of pointers (ob_item) of size nbytes = 0
+    clear ob_item
+    set list's allocated var to 0 = 0 slots
+    return list object 
 [/code]
 
 It is important to notice the difference between allocated slots and the size of the list. The size of a list is the same as len(l). The number of allocated slots is what has been allocated in memory. Often, you will see that allocated can be greater than size. This is to avoid needing calling realloc each time a new elements is appended to the list. We will see more about that later.
