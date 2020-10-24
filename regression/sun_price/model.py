@@ -9,8 +9,8 @@ x, y = [], []
 with open('train.csv', 'r', newline='') as csvfile:
     reader = csv.reader(csvfile, delimiter=' ')
     for row in reader:
-        town_code, unemployment, price = row[0], float(row[1]), float(row[2])
-        x.append(unemployment)
+        sun_hours, price = float(row[1]), float(row[2])
+        x.append(sun_hours)
         y.append(price)
 
 x = np.array(x).reshape((-1, 1))
@@ -23,6 +23,6 @@ print(r_sq)
 print(model.intercept_)
 print(model.coef_)
 
-x_new = np.array([8, 10, 12, 14, 16]).reshape((-1, 1))
-y_new = model.predict(x_new)
-print(y_new)
+# x_new = np.array([8, 10, 12, 14, 16]).reshape((-1, 1))
+# y_new = model.predict(x_new)
+# print(y_new)

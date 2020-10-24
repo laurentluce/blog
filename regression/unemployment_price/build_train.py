@@ -15,12 +15,12 @@ with open('population.csv', 'r', newline='') as csvfile:
 with open('price.csv', 'r', newline='') as csvfile:
     reader = csv.reader(csvfile, delimiter=',')
     for row in reader:
-        town_code, price = row[1], row[10]
-        if town_code in towns:
-            try:
-                towns[town_code].append(float(price))
-            except ValueError:
-                pass
+        try:
+            town_code, price = row[1], float(row[10])
+            if town_code in towns:
+                towns[town_code].append(price)
+        except ValueError:
+            pass
 
 towns = {k:v for (k, v) in towns.items() if len(v) == 2}
 

@@ -7,16 +7,16 @@ x, y = [], []
 with open('train.csv', 'r', newline='') as csvfile:
     reader = csv.reader(csvfile, delimiter=' ')
     for row in reader:
-        town_code, unemployment, price = row[0], row[1], row[2]
-        x.append(float(unemployment))
-        y.append(float(price))
+        sun_hours, price = float(row[1]), float(row[2])
+        x.append(sun_hours)
+        y.append(price)
 
 plt.plot(x, y, 'ro', markersize=1)
 def f(t):
-    return -9.03 * t + 1525
-t1 = np.arange(0, 20, 0.01)
+    return 0.0544 * t + 1434
+t1 = np.arange(1200, 3500, 1)
 plt.plot(t1, f(t1), 'b.', markersize=1)
-plt.xlabel('Unemployment %')
+plt.xlabel('Sunshine hours per year')
 plt.ylabel('Price per square meter')
-plt.axis([0, 20, 1000, 15000])
+plt.axis([1200, 3500, 500, 6000])
 plt.show()
